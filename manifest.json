@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "網頁自動填表小幫手",
+  "version": "1.0",
+  "description": "自動勾選同意並選擇票數",
+  "permissions": [
+    "storage"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true  
+    }
+  ]
+}
