@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 });
 
 function executeFillForm(settings) {
-    // === 1. 處理自動打勾 (擬人化延遲) ===
+    // === 1. 處理自動打勾 ===
     if (settings.autoCheck && !hasChecked) {
         let allCheckboxes = document.querySelectorAll('input[type="checkbox"]');
         const keywords = ['agree', 'term', 'accept', 'policy', 'condition', 'consent'];
@@ -27,7 +27,6 @@ function executeFillForm(settings) {
                 
                 hasChecked = true; // 上鎖，避免重複觸發
                 
-                // 模擬人類：看到網頁後，花 200~400 毫秒移動滑鼠去打勾
                 setTimeout(() => {
                     checkbox.click(); 
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
@@ -38,27 +37,31 @@ function executeFillForm(settings) {
         });
     }
 
-    // === 2. 處理數量填寫 (擬人化延遲) ===
+    // === 2. 處理數量填寫 (地毯式搜索 + 擴充關鍵字) ===
     if (settings.dropdownValue !== "none" && !hasFilledQty) {
         let targetElement = null;
         let allSelects = document.querySelectorAll('select');
-        let allInputs = document.querySelectorAll('input[type="text"], input:not([type])');
-        const keywords = ['qty', 'quantity', 'amount', 'ticketprice'];
+        let allInputs = document.querySelectorAll('input[type="text"], input:not([type]), input[type="number"]');
+        
+        // 🎯 【關鍵升級】在這裡加入了 'volume' 和 'seatgrade'
+        const keywords = ['qty', 'quantity', 'amount', 'ticketprice', 'volume', 'seatgrade'];
 
-        // 尋找 Select
+        // 尋找 Select 下拉選單
         for (let sel of allSelects) {
             let identifier = `${sel.id} ${sel.name} ${sel.className}`.toLowerCase();
             if (keywords.some(k => identifier.includes(k)) && !sel.disabled && sel.offsetParent !== null) {
-                targetElement = sel; break;
+                targetElement = sel; 
+                break; // 找到第一個就鎖定
             }
         }
 
-        // 尋找 Input
+        // 尋找 Input 輸入框
         if (!targetElement) {
             for (let inp of allInputs) {
                 let identifier = `${inp.id} ${inp.name} ${inp.className} ${inp.getAttribute('ng-model') || ''}`.toLowerCase();
                 if (keywords.some(k => identifier.includes(k)) && !inp.disabled && inp.offsetParent !== null) {
-                    targetElement = inp; break;
+                    targetElement = inp; 
+                    break;
                 }
             }
         }
@@ -71,19 +74,21 @@ function executeFillForm(settings) {
 
             hasFilledQty = true; // 上鎖
 
-            // 模擬人類：打勾完之後，再花 300~600 毫秒去選擇數量
             setTimeout(() => {
                 let prototype = targetElement.tagName.toLowerCase() === 'select' 
                     ? window.HTMLSelectElement.prototype 
                     : window.HTMLInputElement.prototype;
 
+                // 1. 標準賦值
                 targetElement.value = settings.dropdownValue;
                 
+                // 2. 繞過框架攔截
                 let nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
                 if(nativeInputValueSetter) {
                     nativeInputValueSetter.call(targetElement, settings.dropdownValue);
                 }
 
+                // 3. 觸發所有事件 (包含這個網頁特有的 onchange="sltTicket(...)")
                 targetElement.dispatchEvent(new Event('focus', { bubbles: true }));
                 targetElement.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: settings.dropdownValue }));
                 targetElement.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: settings.dropdownValue }));
