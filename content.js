@@ -1,118 +1,195 @@
-// 加入防護鎖，確保不會因為重試機制而重複執行
+// === 狀態鎖 ===
 let hasChecked = false;
 let hasFilledQty = false;
+let hasClickedZone = false; 
 
-// 產生隨機延遲時間的函數 (模擬人類反應時間)
 function getRandomDelay(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
+// 🔓 萬能開鎖演算法：穿透 Shadow DOM
+function getAllElementsIncludingShadow() {
+    const allElements = [];
+    function traverse(root) {
+        const elements = root.querySelectorAll('*');
+        elements.forEach(el => {
+            allElements.push(el);
+            if (el.shadowRoot) traverse(el.shadowRoot);
+        });
+    }
+    traverse(document);
+    return allElements;
+}
+
+// 🥷 隱匿刺客點擊：繞過 Anti-bot 監控
+function stealthPhysicalClick(element) {
+    let targetElement = element.closest('a') || element.closest('tr') || element;
+    console.log(`🥷 準備暗殺目標:`, targetElement);
+
+    try { window.HTMLElement.prototype.click.call(targetElement); } catch(e) {}
+
+    const events = ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+    events.forEach(eventType => {
+        try {
+            const mouseEvent = new MouseEvent(eventType, {
+                view: window, bubbles: true, cancelable: true, buttons: 1, detail: 1
+            });
+            targetElement.dispatchEvent(mouseEvent);
+        } catch(e) {}
+    });
+}
+
+// ⌨️ 真人鍵盤輸入模擬器 (對付 Angular/React)
+function simulateHumanInput(targetElement, value) {
+    let prototype = targetElement.tagName.toLowerCase() === 'select' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
+    
+    // 底層寫入
+    let nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+    if(nativeInputValueSetter) nativeInputValueSetter.call(targetElement, value);
+    else targetElement.value = value;
+
+    // 觸發全套事件
+    targetElement.dispatchEvent(new Event('focus', { bubbles: true }));
+    targetElement.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: value.toString() }));
+    targetElement.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: value.toString() }));
+    targetElement.dispatchEvent(new Event('input', { bubbles: true }));
+    targetElement.dispatchEvent(new Event('change', { bubbles: true }));
+    targetElement.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: value.toString() }));
+    targetElement.dispatchEvent(new Event('blur', { bubbles: true }));
+}
+
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.action === "fillForm") {
-        hasChecked = false; // 手動點擊時重置鎖
+        hasChecked = false; 
         hasFilledQty = false;
+        hasClickedZone = false;
         executeFillForm(request.settings);
     }
 });
 
 function executeFillForm(settings) {
-    // === 1. 處理自動打勾 ===
+    // === 1. 自動打勾條款 ===
     if (settings.autoCheck && !hasChecked) {
         let allCheckboxes = document.querySelectorAll('input[type="checkbox"]');
         const keywords = ['agree', 'term', 'accept', 'policy', 'condition', 'consent'];
-
         allCheckboxes.forEach(checkbox => {
             let identifier = `${checkbox.id} ${checkbox.className} ${checkbox.name} ${checkbox.value}`.toLowerCase();
             if (keywords.some(k => identifier.includes(k)) && !checkbox.checked) {
-                
-                hasChecked = true; // 上鎖，避免重複觸發
-                
+                hasChecked = true; 
                 setTimeout(() => {
-                    checkbox.click(); 
+                    window.HTMLElement.prototype.click.call(checkbox);
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                    checkbox.dispatchEvent(new Event('input', { bubbles: true }));
-                    console.log("🤖 擬人化防護：已勾選同意條款");
-                }, getRandomDelay(200, 400)); 
+                }, getRandomDelay(150, 300)); 
             }
         });
     }
 
-    // === 2. 處理數量填寫 (地毯式搜索 + 擴充關鍵字) ===
-    if (settings.dropdownValue !== "none" && !hasFilledQty) {
-        let targetElement = null;
-        let allSelects = document.querySelectorAll('select');
-        let allInputs = document.querySelectorAll('input[type="text"], input:not([type]), input[type="number"]');
-        
-        // 🎯 【關鍵升級】在這裡加入了 'volume' 和 'seatgrade'
-        const keywords = ['qty', 'quantity', 'amount', 'ticketprice', 'volume', 'seatgrade'];
+    // === 2. 智慧尋找票區與處理數量 (支援 KKTIX 模式與傳統模式) ===
+    if (settings.autoClickZone && settings.zoneKeywords && !hasClickedZone) {
+        const targetKeywords = settings.zoneKeywords.split(',').map(k => k.trim()).filter(k => k.length > 0);
 
-        // 尋找 Select 下拉選單
-        for (let sel of allSelects) {
-            let identifier = `${sel.id} ${sel.name} ${sel.className}`.toLowerCase();
-            if (keywords.some(k => identifier.includes(k)) && !sel.disabled && sel.offsetParent !== null) {
-                targetElement = sel; 
-                break; // 找到第一個就鎖定
+        if (targetKeywords.length > 0) {
+            let allElements = getAllElementsIncludingShadow();
+            let foundElement = null;
+
+            for (let keyword of targetKeywords) {
+                if (foundElement) break; 
+                let cleanKeyword = keyword.toLowerCase().replace(/\s+/g, '');
+                let matches = []; 
+
+                for (let el of allElements) {
+                    let text = (el.textContent || '').toLowerCase().replace(/\s+/g, '');
+                    if (text.includes(cleanKeyword)) {
+                        if (['td', 'span', 'tr', 'button', 'a', 'div'].includes(el.tagName.toLowerCase())) {
+                            matches.push(el);
+                        }
+                    }
+                }
+
+                if (matches.length > 0) {
+                    foundElement = matches.find(el => el.tagName.toLowerCase() === 'a') 
+                                || matches.find(el => el.tagName.toLowerCase() === 'td') 
+                                || matches.find(el => el.tagName.toLowerCase() === 'span') 
+                                || matches[0];
+                    break; 
+                }
+            }
+
+            if (foundElement) {
+                hasClickedZone = true; 
+                
+                // 🕵️‍♂️ 檢查是否為 KKTIX 同列數量輸入模式
+                // 往上找該票種的容器 (支援 KKTIX 的 .ticket-unit 或 .display-table-row)
+                let rowContainer = foundElement.closest('.ticket-unit, .display-table-row, tr, li');
+                let rowQtyInput = null;
+                
+                if (rowContainer) {
+                    // 在這行裡面找輸入框或下拉選單 (必須是未禁用的，代表沒售完)
+                    rowQtyInput = rowContainer.querySelector('input:not([disabled]), select:not([disabled])');
+                }
+
+                if (rowQtyInput && settings.dropdownValue !== "none") {
+                    // 🎯 KKTIX 模式：直接在這行填入數量
+                    console.log(`🎯 [KKTIX模式] 發現同行數量輸入框！準備填入: ${settings.dropdownValue}`);
+                    hasFilledQty = true; // 既然直接填了，全域數量搜尋就不必做了
+                    setTimeout(() => {
+                        simulateHumanInput(rowQtyInput, settings.dropdownValue);
+                        console.log(`🎫 專屬票區數量已設定為: ${settings.dropdownValue}`);
+                    }, getRandomDelay(200, 400));
+                } else {
+                    // ⚔️ 傳統模式 (前兩個網站)：執行點擊
+                    setTimeout(() => {
+                        stealthPhysicalClick(foundElement);
+                        console.log(`🤖 [點擊模式] 刺客已執行任務：觸發目標 [${foundElement.textContent.trim()}]`);
+                    }, getRandomDelay(200, 400)); 
+                }
             }
         }
+    }
 
-        // 尋找 Input 輸入框
-        if (!targetElement) {
-            for (let inp of allInputs) {
-                let identifier = `${inp.id} ${inp.name} ${inp.className} ${inp.getAttribute('ng-model') || ''}`.toLowerCase();
-                if (keywords.some(k => identifier.includes(k)) && !inp.disabled && inp.offsetParent !== null) {
-                    targetElement = inp; 
-                    break;
+    // === 3. 獨立全域數量處理 (給非 KKTIX 網站使用) ===
+    if (settings.dropdownValue !== "none" && !hasFilledQty) {
+        let allElements = getAllElementsIncludingShadow();
+        let targetElement = null;
+        const keywords = ['qty', 'quantity', 'amount', 'ticketprice', 'volume', 'seatgrade'];
+
+        for (let el of allElements) {
+            let tag = el.tagName ? el.tagName.toLowerCase() : '';
+            if (tag === 'select' || (tag === 'input' && ['text', 'number', ''].includes(el.getAttribute('type') || ''))) {
+                let identifier = `${el.id} ${el.name} ${el.className} ${el.getAttribute('ng-model') || ''}`.toLowerCase();
+                if (keywords.some(k => identifier.includes(k)) && !el.disabled) {
+                    targetElement = el; break;
                 }
             }
         }
 
         if (targetElement) {
             if(targetElement.value === settings.dropdownValue) {
-                hasFilledQty = true;
-                return;
+                hasFilledQty = true; return;
             }
-
-            hasFilledQty = true; // 上鎖
-
+            hasFilledQty = true;
             setTimeout(() => {
-                let prototype = targetElement.tagName.toLowerCase() === 'select' 
-                    ? window.HTMLSelectElement.prototype 
-                    : window.HTMLInputElement.prototype;
-
-                // 1. 標準賦值
-                targetElement.value = settings.dropdownValue;
-                
-                // 2. 繞過框架攔截
-                let nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
-                if(nativeInputValueSetter) {
-                    nativeInputValueSetter.call(targetElement, settings.dropdownValue);
-                }
-
-                // 3. 觸發所有事件 (包含這個網頁特有的 onchange="sltTicket(...)")
-                targetElement.dispatchEvent(new Event('focus', { bubbles: true }));
-                targetElement.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: settings.dropdownValue }));
-                targetElement.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: settings.dropdownValue }));
-                targetElement.dispatchEvent(new Event('input', { bubbles: true }));
-                targetElement.dispatchEvent(new Event('change', { bubbles: true }));
-                targetElement.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: settings.dropdownValue }));
-                targetElement.dispatchEvent(new Event('blur', { bubbles: true }));
-                
-                console.log("🤖 擬人化防護：已填寫數量 " + settings.dropdownValue);
-            }, getRandomDelay(300, 600)); 
+                simulateHumanInput(targetElement, settings.dropdownValue);
+                console.log(`🎫 全域數量已設定為: ${settings.dropdownValue}`);
+            }, getRandomDelay(400, 700)); 
         }
     }
 }
 
 // === 自動重試機制 ===
 function startAutoFill() {
-    chrome.storage.sync.get(['autoCheck', 'dropdownValue'], function(data) {
+    chrome.storage.sync.get(['autoCheck', 'dropdownValue', 'autoClickZone', 'zoneKeywords'], function(data) {
         let attempts = 0;
         let intervalId = setInterval(() => {
             attempts++;
             executeFillForm(data);
             
-            // 如果兩件事都做完了，或者嘗試超過 50 次 (5秒)，就停止偵測
-            if ((hasChecked && hasFilledQty) || attempts >= 50) {
+            let allDone = true;
+            if (data.autoCheck && !hasChecked) allDone = false;
+            if (data.dropdownValue !== "none" && !hasFilledQty) allDone = false;
+            if (data.autoClickZone && data.zoneKeywords && !hasClickedZone) allDone = false;
+
+            if (allDone || attempts >= 100) {
                 clearInterval(intervalId);
             }
         }, 100); 

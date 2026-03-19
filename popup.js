@@ -1,33 +1,37 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const enableAutoCheck = document.getElementById('enableAutoCheck');
-    const dropdownChoice = document.getElementById('dropdownChoice');
+    let autoCheck = document.getElementById('autoCheck');
+    let dropdownValue = document.getElementById('dropdownValue');
+    let autoClickZone = document.getElementById('autoClickZone');
+    let zoneKeywords = document.getElementById('zoneKeywords');
 
-    // 1. 打開面板時，載入之前儲存的設定
-    chrome.storage.sync.get(['autoCheck', 'dropdownValue'], function(data) {
-        if (data.autoCheck !== undefined) enableAutoCheck.checked = data.autoCheck;
-        if (data.dropdownValue !== undefined) dropdownChoice.value = data.dropdownValue;
+    // 讀取已儲存的設定
+    chrome.storage.sync.get(['autoCheck', 'dropdownValue', 'autoClickZone', 'zoneKeywords'], function(data) {
+        if (data.autoCheck !== undefined) autoCheck.checked = data.autoCheck;
+        if (data.dropdownValue !== undefined) dropdownValue.value = data.dropdownValue;
+        if (data.autoClickZone !== undefined) autoClickZone.checked = data.autoClickZone;
+        if (data.zoneKeywords !== undefined) zoneKeywords.value = data.zoneKeywords;
     });
 
-    // 2. 建立一個「儲存並執行」的共用函數
-    function saveAndApply() {
-        const settings = {
-            autoCheck: enableAutoCheck.checked,
-            dropdownValue: dropdownChoice.value
+    // 監聽變更並儲存，同時發送訊息給網頁
+    function saveAndNotify() {
+        let settings = {
+            autoCheck: autoCheck.checked,
+            dropdownValue: dropdownValue.value,
+            autoClickZone: autoClickZone.checked,
+            zoneKeywords: zoneKeywords.value
         };
 
-        // 儲存設定到 Chrome
         chrome.storage.sync.set(settings, function() {
-            // 找出當前正在瀏覽的網頁頁籤，發送訊息讓它立刻改變網頁內容
             chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-                // 確保有抓到當前頁面，避免報錯
                 if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, {action: "fillForm", settings: settings});
+                    chrome.tabs.sendMessage(tabs[0].id, { action: "fillForm", settings: settings });
                 }
             });
         });
     }
 
-    // 3. 監聽變更事件 (只要一改變，立刻觸發存檔並執行！)
-    enableAutoCheck.addEventListener('change', saveAndApply);
-    dropdownChoice.addEventListener('change', saveAndApply);
+    autoCheck.addEventListener('change', saveAndNotify);
+    dropdownValue.addEventListener('change', saveAndNotify);
+    autoClickZone.addEventListener('change', saveAndNotify);
+    zoneKeywords.addEventListener('input', saveAndNotify); // 輸入文字時自動儲存
 });
