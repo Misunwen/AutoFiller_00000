@@ -1,43 +1,58 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html>
 <head>
     <meta charset="UTF-8">
+    <title>搶票特工設定</title>
     <style>
-        body { width: 300px; padding: 15px; font-family: "微軟正黑體", sans-serif; }
-        .setting-group { margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #ccc; }
-        .setting-group:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-        label { display: flex; align-items: center; cursor: pointer; font-weight: bold; font-size: 14px; }
-        select, input[type="text"] { width: 100%; margin-top: 8px; padding: 5px; font-size: 14px; box-sizing: border-box; }
-        .hint { font-size: 12px; color: #666; margin-top: 5px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; width: 320px; padding: 15px; background-color: #1e1e1e; color: #fff; }
+        h2 { text-align: center; color: #4CAF50; margin-top: 0; font-size: 20px; text-shadow: 0 0 5px rgba(76, 175, 80, 0.5); }
+        .setting-item { margin-bottom: 15px; display: flex; align-items: center; }
+        .setting-item label { margin-left: 8px; font-size: 14px; cursor: pointer; }
+        .setting-item input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: #4CAF50; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #aaa; }
+        select, input[type="text"] { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #444; background-color: #333; color: #fff; font-size: 14px; box-sizing: border-box; }
+        select:focus, input[type="text"]:focus { outline: none; border-color: #4CAF50; }
+        .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }
     </style>
 </head>
 <body>
-    <div class="setting-group">
-        <label>
-            <input type="checkbox" id="autoCheck"> 
-            自動勾選「同意服務條款」
-        </label>
+    <h2>一定是(ゝ∀･)b"6.0</h2>
+    
+    <div class="setting-item">
+        <input type="checkbox" id="autoCheck">
+        <label for="autoCheck">自動勾選「同意服務條款」</label>
     </div>
 
-    <div class="setting-group">
-        <label>自動選擇票數 / 數量：</label>
+    <!-- 🌟 新增的自動 F5 開關 -->
+    <div class="setting-item">
+        <input type="checkbox" id="autoReload">
+        <label for="autoReload">售完自動重整(Auto F5)隨機等待1.2S-2.5S</label>
+    </div>
+
+    <div class="input-group">
+        <label for="dropdownValue">自動選擇票數：</label>
         <select id="dropdownValue">
-            <option value="none">不自動選擇</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
+            <option value="none">不自動選張數</option>
+            <option value="1">1 張</option>
+            <option value="2">2 張</option>
+            <option value="3">3 張</option>
+            <option value="4">4 張</option>
         </select>
     </div>
 
-    <!-- 🔥 新增的自動點選區域介面 -->
-    <div class="setting-group">
-        <label>
-            <input type="checkbox" id="autoClickZone"> 
-            自動點擊指定區域/關鍵字
-        </label>
-        <input type="text" id="zoneKeywords" placeholder="例: B2層B8區, 6800">
-        <div class="hint">可用逗號分隔多個關鍵字 (例如: B2層, B3層)。由左至右為優先順序，會點擊最上方第一個符合的按鈕。</div>
+    <div class="setting-item">
+        <input type="checkbox" id="autoClickZone">
+        <label for="autoClickZone">自動點擊指定區域/票價</label>
+    </div>
+
+    <div class="input-group">
+        <label for="zoneKeywords">區域關鍵字 (用逗號隔開)：</label>
+        <input type="text" id="zoneKeywords" placeholder="例如: 特區, 搖滾區, 5880">
+    </div>
+
+    <div class="footer">
+        Status: <span style="color: #4CAF50;">Active / 隱蔽模式</span>
     </div>
 
     <script src="popup.js"></script>

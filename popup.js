@@ -1,37 +1,38 @@
 document.addEventListener('DOMContentLoaded', function() {
-    let autoCheck = document.getElementById('autoCheck');
-    let dropdownValue = document.getElementById('dropdownValue');
-    let autoClickZone = document.getElementById('autoClickZone');
-    let zoneKeywords = document.getElementById('zoneKeywords');
+    var autoCheckCheckbox = document.getElementById('autoCheck');
+    var autoReloadCheckbox = document.getElementById('autoReload'); // 新增開關
+    var dropdownSelect = document.getElementById('dropdownValue');
+    var autoClickZoneCheckbox = document.getElementById('autoClickZone');
+    var zoneKeywordsInput = document.getElementById('zoneKeywords');
 
-    // 讀取已儲存的設定
-    chrome.storage.sync.get(['autoCheck', 'dropdownValue', 'autoClickZone', 'zoneKeywords'], function(data) {
-        if (data.autoCheck !== undefined) autoCheck.checked = data.autoCheck;
-        if (data.dropdownValue !== undefined) dropdownValue.value = data.dropdownValue;
-        if (data.autoClickZone !== undefined) autoClickZone.checked = data.autoClickZone;
-        if (data.zoneKeywords !== undefined) zoneKeywords.value = data.zoneKeywords;
+    // 載入設定 (把 autoReload 也讀進來)
+    chrome.storage.sync.get(['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords'], function(data) {
+        if (data.autoCheck !== undefined) autoCheckCheckbox.checked = data.autoCheck;
+        if (data.autoReload !== undefined) autoReloadCheckbox.checked = data.autoReload; // 載入狀態
+        if (data.dropdownValue !== undefined) dropdownSelect.value = data.dropdownValue;
+        if (data.autoClickZone !== undefined) autoClickZoneCheckbox.checked = data.autoClickZone;
+        if (data.zoneKeywords !== undefined) zoneKeywordsInput.value = data.zoneKeywords;
     });
 
-    // 監聽變更並儲存，同時發送訊息給網頁
-    function saveAndNotify() {
-        let settings = {
-            autoCheck: autoCheck.checked,
-            dropdownValue: dropdownValue.value,
-            autoClickZone: autoClickZone.checked,
-            zoneKeywords: zoneKeywords.value
-        };
+    // 儲存設定
+    autoCheckCheckbox.addEventListener('change', function() {
+        chrome.storage.sync.set({'autoCheck': autoCheckCheckbox.checked});
+    });
 
-        chrome.storage.sync.set(settings, function() {
-            chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-                if (tabs[0]) {
-                    chrome.tabs.sendMessage(tabs[0].id, { action: "fillForm", settings: settings });
-                }
-            });
-        });
-    }
+    // 儲存重整開關狀態
+    autoReloadCheckbox.addEventListener('change', function() {
+        chrome.storage.sync.set({'autoReload': autoReloadCheckbox.checked});
+    });
 
-    autoCheck.addEventListener('change', saveAndNotify);
-    dropdownValue.addEventListener('change', saveAndNotify);
-    autoClickZone.addEventListener('change', saveAndNotify);
-    zoneKeywords.addEventListener('input', saveAndNotify); // 輸入文字時自動儲存
+    dropdownSelect.addEventListener('change', function() {
+        chrome.storage.sync.set({'dropdownValue': dropdownSelect.value});
+    });
+
+    autoClickZoneCheckbox.addEventListener('change', function() {
+        chrome.storage.sync.set({'autoClickZone': autoClickZoneCheckbox.checked});
+    });
+
+    zoneKeywordsInput.addEventListener('input', function() {
+        chrome.storage.sync.set({'zoneKeywords': zoneKeywordsInput.value});
+    });
 });

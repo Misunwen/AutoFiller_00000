@@ -1,10 +1,11 @@
 // =========================================================================
-// 🚀 搶票外掛 V5.1 - 拓元精準鎖定版 (IBON & 拓元 雙殺)
+// 🚀 搶票外掛 V5.5 - 財神爺自動對帳版 (KKTIX 票價逗號無視)
 // =========================================================================
 
 let hasChecked = false;
 let hasFilledQty = false;
 let hasClickedZone = false; 
+window.isReloading = false; 
 
 function getRandomDelay(min, max) { return Math.floor(Math.random() * (max - min + 1) + min); }
 
@@ -22,11 +23,7 @@ function getAllElementsIncludingShadow() {
 }
 
 function stealthPhysicalClick(element) {
-    // 🎯 拓元修復核心：穿甲彈邏輯
-    // 1. 往上找：看看是不是點到了按鈕裡面的字 (例如 <span>)
     let targetToClick = element.closest('a, button, [role="button"], area');
-    
-    // 2. 往下找：如果是被 <ul> 或 <li> 這種大外框騙了，就直接往裡面挖出 <a> 按鈕！
     if (!targetToClick) {
         targetToClick = element.querySelector('a, button, [role="button"], area') || element;
     }
@@ -38,7 +35,6 @@ function stealthPhysicalClick(element) {
 
     console.log(`💥 [精準狙擊] 鎖定目標準備開火!`, targetToClick);
 
-    // 🕵️‍♂️ 遇到 javascript: 連結，發送暗號給主世界特工 (專治 ibon)
     let hrefAttr = targetToClick.getAttribute('href') || targetToClick.href || "";
     if (hrefAttr.toLowerCase().includes('javascript:')) {
         console.log("⚡ [系統] 觸發 CSP 防護，呼叫特工執行暗號...");
@@ -46,7 +42,6 @@ function stealthPhysicalClick(element) {
         return; 
     }
 
-    // 常規物理點擊 (專治拓元、KKTIX)
     try { targetToClick.click(); } catch(e) {}
     try { window.HTMLElement.prototype.click.call(targetToClick); } catch(e) {}
     const events = ['pointerover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
@@ -60,12 +55,14 @@ function simulateHumanInput(targetElement, value) {
     let nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
     if(nativeInputValueSetter) nativeInputValueSetter.call(targetElement, value);
     else targetElement.value = value;
+    
     targetElement.dispatchEvent(new Event('focus', { bubbles: true }));
+    targetElement.dispatchEvent(new Event('input', { bubbles: true })); 
     targetElement.dispatchEvent(new Event('change', { bubbles: true }));
     targetElement.dispatchEvent(new Event('blur', { bubbles: true }));
 }
 
-function executeFillForm(settings) {
+function executeFillForm(settings, attempts) {
     if (settings.autoCheck && !hasChecked) {
         let allCheckboxes = document.querySelectorAll('input[type="checkbox"]');
         const keywords = ['agree', 'term', 'accept', 'policy', 'condition', 'consent'];
@@ -88,7 +85,7 @@ function executeFillForm(settings) {
         for (let el of allElements) {
             let tag = el.tagName ? el.tagName.toLowerCase() : '';
             if (tag === 'select' || (tag === 'input' && ['text', 'number', ''].includes(el.getAttribute('type') || ''))) {
-                if (el.closest('.ticket-unit, .display-table-row')) continue;
+                if (el.closest('.ticket-unit, .display-table-row')) continue; 
                 let identifier = `${el.id} ${el.name} ${el.className} ${el.getAttribute('ng-model') || ''}`.toLowerCase();
                 if (keywords.some(k => identifier.includes(k)) && !el.disabled) { targetElement = el; break; }
             }
@@ -106,15 +103,18 @@ function executeFillForm(settings) {
     }
 
     if (settings.autoClickZone && settings.zoneKeywords && !hasClickedZone) {
+        // 🎯 使用者輸入的關鍵字 (例如: 5880)
         const targetKeywords = settings.zoneKeywords.split(',').map(k => k.trim()).filter(k => k.length > 0);
 
         if (targetKeywords.length > 0) {
             let allElements = getAllElementsIncludingShadow();
             let foundElement = null;
+            let anySoldOutForTarget = false; 
 
             for (let keyword of targetKeywords) {
                 if (foundElement) break; 
-                let cleanKeyword = keyword.toLowerCase().replace(/\s+/g, '');
+                // 將使用者關鍵字的空白、逗號、錢號都去掉 (保險起見)
+                let cleanKeyword = keyword.toLowerCase().replace(/[\s,\$]/g, '');
                 let possibleMatches = []; 
 
                 for (let el of allElements) {
@@ -125,9 +125,19 @@ function executeFillForm(settings) {
                     text += " " + (el.getAttribute('title') || '');
                     text += " " + (el.getAttribute('aria-label') || '');
                     text += " " + (el.getAttribute('alt') || '');
-                    let cleanText = text.toLowerCase().replace(/\s+/g, '');
+                    
+                    // 💰 核心魔法：把網頁上的字去空白、去逗號、去金錢符號！讓 "TWD$5,880" 變成 "twd5880"
+                    let cleanText = text.toLowerCase().replace(/[\s,\$]/g, '');
                     
                     if (cleanText.includes(cleanKeyword)) {
+                        
+                        // 🚫 KKTIX 輪椅/身心障礙陷阱過濾器
+                        if (!cleanKeyword.includes('輪椅') && !cleanKeyword.includes('身心') && !cleanKeyword.includes('障礙')) {
+                            if (cleanText.includes('輪椅') || cleanText.includes('身心障礙') || cleanText.includes('殘障')) {
+                                continue; 
+                            }
+                        }
+
                         let rect = el.getBoundingClientRect();
                         let isVisible = (rect.width > 0 && rect.height > 0) || tag === 'area';
                         
@@ -143,14 +153,23 @@ function executeFillForm(settings) {
                             if (['p', 'h1', 'h2', 'h3', 'h4', 'span', 'strong', 'b', 'td', 'th', 'div'].includes(tag) && !hasInteractiveParent) continue; 
 
                             let isSoldOut = false;
-                            let rowContainer = el.closest('tr, li, .ticket-unit, div.zone-area'); 
+                            let rowContainer = el.closest('tr, li, .ticket-unit, div.zone-area, .display-table-row'); 
                             let classString = (el.className + ' ' + (rowContainer ? rowContainer.className : '')).toLowerCase();
                             
+                            // 同樣把整列的文字也過濾掉逗號，確保判斷精準
+                            let containerText = rowContainer ? rowContainer.textContent.toLowerCase().replace(/[\s,\$]/g, '') : cleanText;
+
                             if (classString.includes('disabled') || classString.includes('soldout')) isSoldOut = true;
-                            if (!isSoldOut && (cleanText.includes('已售完') || cleanText.includes('售罄') || cleanText.includes('缺貨') || cleanText.includes('尚餘:0') || cleanText.includes('尚餘：0'))) isSoldOut = true;
+                            if (!isSoldOut && (containerText.includes('已售完') || containerText.includes('售罄') || containerText.includes('缺貨') || containerText.includes('尚餘:0') || containerText.includes('尚餘：0'))) {
+                                isSoldOut = true;
+                            }
 
                             if (isSoldOut) {
-                                console.log(`🚫 [鷹眼避雷] 該區已售完或尚餘0，繼續尋找...`, el);
+                                if (!el.dataset.logged) {
+                                    console.log(`🚫 [鷹眼避雷] 目標 [${keyword}] 已售完，繼續尋找...`);
+                                    el.dataset.logged = "true";
+                                }
+                                anySoldOutForTarget = true;
                             } else {
                                 possibleMatches.push(el);
                             }
@@ -158,19 +177,18 @@ function executeFillForm(settings) {
                     }
                 }
 
-                // 🎯 拓元修復核心：優先級計分系統
                 if (possibleMatches.length > 0) {
                     possibleMatches.sort((a, b) => {
                         let getScore = (el) => {
                             let t = el.tagName.toLowerCase();
-                            if (['a', 'button', 'area'].includes(t)) return 3; // 實體按鈕最優先
-                            if (['span', 'font', 'b', 'strong'].includes(t)) return 2; // 內部文字次之
-                            if (['li', 'td'].includes(t)) return 1; // 列表再次之
-                            return 0; // ul, div 等大外框最後
+                            if (['a', 'button', 'area'].includes(t)) return 3; 
+                            if (['span', 'font', 'b', 'strong'].includes(t)) return 2; 
+                            if (['li', 'td'].includes(t)) return 1; 
+                            return 0; 
                         };
                         let scoreA = getScore(a);
                         let scoreB = getScore(b);
-                        if (scoreA !== scoreB) return scoreB - scoreA; // 分數高的排前面
+                        if (scoreA !== scoreB) return scoreB - scoreA; 
                         
                         let tA = ((a.textContent || '') + (a.getAttribute('title') || '')).trim();
                         let tB = ((b.textContent || '') + (b.getAttribute('title') || '')).trim();
@@ -194,6 +212,14 @@ function executeFillForm(settings) {
                     hasClickedZone = true; 
                     setTimeout(() => { stealthPhysicalClick(foundElement); }, getRandomDelay(150, 300)); 
                 }
+            } 
+            else if (settings.autoReload && anySoldOutForTarget && !window.isReloading && attempts > 4) {
+                window.isReloading = true;
+                let reloadDelay = getRandomDelay(1200, 2500); 
+                console.log(`🔄 [自動撿漏啟動] 你的目標區域目前均已售完！外掛將在 ${reloadDelay} 毫秒後自動 F5 重新整理刷票...`);
+                setTimeout(() => {
+                    window.location.reload();
+                }, reloadDelay);
             }
         }
     }
@@ -202,13 +228,14 @@ function executeFillForm(settings) {
 function startAutoFill() {
     if (window.hasStartedAutoFill) return;
     window.hasStartedAutoFill = true;
-    chrome.storage.sync.get(['autoCheck', 'dropdownValue', 'autoClickZone', 'zoneKeywords'], function(data) {
+    chrome.storage.sync.get(['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords'], function(data) {
         if (!data) return; 
-        console.log("🚀 [系統] 搶票引擎已強制啟動！目標關鍵字：", data.zoneKeywords);
+        console.log("🚀 [系統] 搶票引擎已啟動！目標關鍵字：", data.zoneKeywords);
         let attempts = 0;
         let intervalId = setInterval(() => {
+            if (window.isReloading) return; 
             attempts++;
-            executeFillForm(data);
+            executeFillForm(data, attempts);
             let allDone = true;
             if (data.autoCheck && !hasChecked) allDone = false;
             if (data.dropdownValue !== "none" && !hasFilledQty) allDone = false;
