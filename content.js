@@ -1,5 +1,5 @@
 // =========================================================================
-// 🚀 搶票外掛 V5.5 - 財神爺自動對帳版 (KKTIX 票價逗號無視)
+// 🚀 搶票外掛 V5.6 - 精準鎖定升級版 (Ibon 表格強化 & 全半形字元淨化)
 // =========================================================================
 
 let hasChecked = false;
@@ -8,6 +8,15 @@ let hasClickedZone = false;
 window.isReloading = false; 
 
 function getRandomDelay(min, max) { return Math.floor(Math.random() * (max - min + 1) + min); }
+
+// 🔬 終極字串淨化器：轉小寫、全形轉半形、去空白、去逗號、去錢號、去零寬度字元
+function normalizeText(str) {
+    if (!str) return "";
+    let halfWidthStr = str.replace(/[\uff01-\uff5e]/g, function(ch) {
+        return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
+    });
+    return halfWidthStr.toLowerCase().replace(/[\s,\$\u200B-\u200D\uFEFF]/g, '');
+}
 
 function getAllElementsIncludingShadow() {
     const allElements = [];
@@ -23,7 +32,8 @@ function getAllElementsIncludingShadow() {
 }
 
 function stealthPhysicalClick(element) {
-    let targetToClick = element.closest('a, button, [role="button"], area');
+    // 🎯 針對 Ibon 強化：優先尋找帶有 id 或 rel 的 <tr> 表格行，確保點擊有效！
+    let targetToClick = element.closest('a, button, [role="button"], area, tr[id], tr[rel]');
     if (!targetToClick) {
         targetToClick = element.querySelector('a, button, [role="button"], area') || element;
     }
@@ -103,7 +113,6 @@ function executeFillForm(settings, attempts) {
     }
 
     if (settings.autoClickZone && settings.zoneKeywords && !hasClickedZone) {
-        // 🎯 使用者輸入的關鍵字 (例如: 5880)
         const targetKeywords = settings.zoneKeywords.split(',').map(k => k.trim()).filter(k => k.length > 0);
 
         if (targetKeywords.length > 0) {
@@ -113,8 +122,8 @@ function executeFillForm(settings, attempts) {
 
             for (let keyword of targetKeywords) {
                 if (foundElement) break; 
-                // 將使用者關鍵字的空白、逗號、錢號都去掉 (保險起見)
-                let cleanKeyword = keyword.toLowerCase().replace(/[\s,\$]/g, '');
+                // 🔬 使用全新淨化器處理使用者輸入的關鍵字
+                let cleanKeyword = normalizeText(keyword);
                 let possibleMatches = []; 
 
                 for (let el of allElements) {
@@ -126,12 +135,12 @@ function executeFillForm(settings, attempts) {
                     text += " " + (el.getAttribute('aria-label') || '');
                     text += " " + (el.getAttribute('alt') || '');
                     
-                    // 💰 核心魔法：把網頁上的字去空白、去逗號、去金錢符號！讓 "TWD$5,880" 變成 "twd5880"
-                    let cleanText = text.toLowerCase().replace(/[\s,\$]/g, '');
+                    // 🔬 使用全新淨化器處理網頁文字 (自動處理全半形、特殊符號)
+                    let cleanText = normalizeText(text);
                     
                     if (cleanText.includes(cleanKeyword)) {
                         
-                        // 🚫 KKTIX 輪椅/身心障礙陷阱過濾器
+                        // 🚫 KKTIX 輪椅陷阱過濾
                         if (!cleanKeyword.includes('輪椅') && !cleanKeyword.includes('身心') && !cleanKeyword.includes('障礙')) {
                             if (cleanText.includes('輪椅') || cleanText.includes('身心障礙') || cleanText.includes('殘障')) {
                                 continue; 
@@ -156,8 +165,8 @@ function executeFillForm(settings, attempts) {
                             let rowContainer = el.closest('tr, li, .ticket-unit, div.zone-area, .display-table-row'); 
                             let classString = (el.className + ' ' + (rowContainer ? rowContainer.className : '')).toLowerCase();
                             
-                            // 同樣把整列的文字也過濾掉逗號，確保判斷精準
-                            let containerText = rowContainer ? rowContainer.textContent.toLowerCase().replace(/[\s,\$]/g, '') : cleanText;
+                            // 檢查是否售完
+                            let containerText = rowContainer ? normalizeText(rowContainer.textContent) : cleanText;
 
                             if (classString.includes('disabled') || classString.includes('soldout')) isSoldOut = true;
                             if (!isSoldOut && (containerText.includes('已售完') || containerText.includes('售罄') || containerText.includes('缺貨') || containerText.includes('尚餘:0') || containerText.includes('尚餘：0'))) {
@@ -195,7 +204,7 @@ function executeFillForm(settings, attempts) {
                         return tA.length - tB.length;
                     });
                     foundElement = possibleMatches[0];
-                    break;
+                    break; 
                 }
             }
 
