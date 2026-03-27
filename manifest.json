@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "一定是(ゝ∀･)b",
-  "version": "6.0.1",
-  "description": "(ゝ∀･)b 終極特工版",
+  "version": "7.2.0",
+  "description": "(ゝ∀･)b",
   "icons": {
     "16": "icon.png",
     "48": "icon.png",
@@ -12,7 +12,10 @@
     "storage"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "*://*.tixcraft.com/*",
+    "*://*.kktix.cc/*",
+    "*://*.kktix.com/*",
+    "*://*.ibon.com.tw/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -24,17 +27,20 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "*://*.tixcraft.com/*",
+        "*://*.kktix.cc/*",
+        "*://*.kktix.com/*",
+        "*://*.ibon.com.tw/*"
+      ],
       "js": ["content.js"],
-      "run_at": "document_end",
-      "all_frames": true
-    },
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["inject.js"],
-      "world": "MAIN",
-      "run_at": "document_idle",
-      "all_frames": true
+      "resources": ["inject.js"],
+      "matches": ["*://*.ibon.com.tw/*"]
     }
   ]
 }
