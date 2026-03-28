@@ -24,4 +24,6 @@
 通常是因為網站把該區「反灰 (Disabled)」或是「售完」了。
 解法：多設定幾個備案關鍵字（例如：VIP, A區, B區），讓外掛有 Plan B 可以執行。
 
+IBON tixcraft KKTIX tkglobal
+
 

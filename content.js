@@ -403,7 +403,7 @@ function runIBON(settings) {
     let dropdownValue = settings.dropdownValue || "none";
     let autoReload    = settings.autoReload    === true;
     extLog(`🚀 [IBON] 啟動 | 自動選區：${autoClickZone ? '開' : '關'} | 目標：${zoneKeywords || '無'} | 張數：${dropdownValue}`);
-    let state = { lastStep: '', attempts: 0, clicked: false, qtyDone: false };
+    let state = { lastStep: '', attempts: 0, clicked: false, qtyDone: false, noKwLogShown: false };
     let keywords = zoneKeywords.split(/,|，/).map(k => normalizeText(k.trim())).filter(Boolean);
     let scanner = makeIrregularInterval(async () => {
         if (window.isReloading) return;
@@ -413,110 +413,81 @@ function runIBON(settings) {
             state.lastStep = step;
             if (step === 'STEP_SELECT_ZONE') { state.clicked = false; state.attempts = 0; }
         }
-        // ─────────────────────────────────────────────
-        // STEP_SELECT_ZONE：選區
-        // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// STEP_SELECT_ZONE：選區（完整修正版）
+// ─────────────────────────────────────────────
 if (step === 'STEP_SELECT_ZONE') {
     if (!autoClickZone) return;
     if (state.clicked) return;
+    // ✅ 無關鍵字：最優先判斷，不跑任何後續邏輯
+    if (keywords.length === 0) {
+        if (!state.noKwLogShown) {
+            extLog(`⚠️ [IBON] 自動選區已開啟，但未設定關鍵字 → 請手動點選`);
+            state.noKwLogShown = true;
+        }
+        return; // ← 直接 return，不跑過濾、不印掃描 log
+    }
     state.attempts++;
     let areas = Array.from(document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]'));
-    // ✅ 用 title 的「尚餘：0」判斷售完，完全不依賴 tr
+    // ✅ 售完過濾
     let availableAreas = areas.filter(area => {
         let title = area.getAttribute('title') || '';
-        // 尚餘：0 → 售完，踢出
+        if (!title || title.trim() === '') return false;
+        if (title.includes('已售完') || title.includes('售完')) return false;
         let remainMatch = title.match(/尚餘[：:]\s*(\d+)/);
-        if (remainMatch && parseInt(remainMatch[1]) === 0) {
-            return false;
-        }
-        // 含「已售完」文字 → 踢出
-        if (title.includes('已售完') || title.includes('售完')) {
-            return false;
-        }
-        // 沒有 title 或 title 為空 → 踢出（無效 area）
-        if (!title || title.trim() === '') {
-            return false;
-        }
+        if (remainMatch && parseInt(remainMatch[1]) === 0) return false;
         return true;
-        // ⚠️ 不要用 cursor 判斷，IBON 全部 area 都是 cursor:default
     });
-    
     extLog(`🔍 [IBON] 共 ${areas.length} 個區塊，未售完 ${availableAreas.length} 個`);
-	availableAreas.slice(0, 5).forEach((area, i) => {
-    let rawTitle   = area.getAttribute('title') || '';
-    let normalized = normalizeText(rawTitle);
-    extLog(`🔬 raw[${i}]: ${rawTitle.slice(0, 80)}`);
-    extLog(`🔬 norm[${i}]: ${normalized.slice(0, 80)}`);
-});
-    // 無關鍵字：選第一個未售完
-    if (keywords.length === 0) {
-        if (availableAreas.length > 0) {
-            let firstAvail = availableAreas[0];
-            let title = firstAvail.getAttribute('title') || '';
-            extLog(`🎯 [IBON] 無關鍵字，選第一個未售完：${title.slice(0, 50)}`);
-            state.clicked = true;
-            await sleep(randInt(100, 250));
-            let actionStr = getAreaAction(firstAvail);
-            if (!callSend(actionStr)) await humanClick(firstAvail);
-        } else {
-            extLog(`⚠️ [IBON] 所有區域皆已售完`);
-            if (autoReload) triggerAutoReload(autoReload);
-            scanner.stop();
-        }
-        return;
+    // ✅ 有關鍵字比對
+    function matchKeyword(normalizedTitle, kw) {
+        let regex = new RegExp(kw + '[區区]', 'i');
+        return regex.test(normalizedTitle);
     }
-    // 有關鍵字：從未售完清單中找符合的，按票價由高到低排序
     let matchedAreas = [];
     for (let area of availableAreas) {
-        let areaId    = area.id || '';
-        let areaTitle = normalizeText(area.getAttribute('title') || '');
-        let areaText  = normalizeText([
-            areaId,
-            area.getAttribute('alt')       || '',
-            area.getAttribute('data-name') || ''
-        ].join(' '));
-        let actionStr = getAreaAction(area);
-        let codeM  = actionStr.match(/Send\s*\([^,]+,[^,]+,\s*['"]([^'"]+)['"]/);
-        let code   = codeM ? normalizeText(codeM[1]) : '';
-        let combined = areaText + areaTitle + code;
-        if (keywords.some(kw => combined.includes(kw))) {
-            let rawTitle   = area.getAttribute('title') || '';
+        let rawTitle = area.getAttribute('title') || '';
+        let areaTitle = normalizeText(rawTitle);
+        if (keywords.some(kw => matchKeyword(areaTitle, kw))) {
             let priceMatch = rawTitle.match(/票價[：:]\s*(\d+)/);
-            let price      = priceMatch ? parseInt(priceMatch[1]) : 0;
-            matchedAreas.push({ area, price, rawTitle });
+            let price = priceMatch ? parseInt(priceMatch[1]) : 0;
+            let remainMatch = rawTitle.match(/尚餘[：:]\s*(\d+)/);
+            let remain = remainMatch ? parseInt(remainMatch[1]) : 999;
+            if (remain > 0) {
+                matchedAreas.push({ area, price, remain, rawTitle });
+            }
         }
     }
-    // ✅ 按票價由高到低排序
-    matchedAreas.sort((a, b) => b.price - a.price);
-    matchedAreas.forEach((item, i) => {
-        extLog(`🏷️ 符合第${i + 1}名 票價${item.price}：${item.rawTitle.slice(0, 50)}`);
-    });
-    let matched = matchedAreas.length > 0 ? matchedAreas[0].area : null;
-    if (matched) {
-        let actionStr = getAreaAction(matched);
-        let title     = matched.getAttribute('title') || '';
-        extLog(`🎯 [IBON] 命中目標！${title.slice(0, 60)}`);
+    matchedAreas.sort((a, b) => b.price - a.price || b.remain - a.remain);
+    if (matchedAreas.length > 0) {
+        matchedAreas.forEach((item, i) => {
+            extLog(`🏷️ 候選第${i + 1}名 票價${item.price} 尚餘${item.remain}：${item.rawTitle.slice(0, 50)}`);
+        });
+        let best = matchedAreas[0];
+        let actionStr = getAreaAction(best.area);
+        extLog(`🎯 [IBON] 命中目標！${best.rawTitle.slice(0, 60)}`);
         state.clicked = true;
         try {
-            matched.scrollIntoView({ behavior: 'instant', block: 'center' });
-            matched.style.outline         = '4px solid #00FF00';
-            matched.style.backgroundColor = 'rgba(0,255,0,0.2)';
+            best.area.scrollIntoView({ behavior: 'instant', block: 'center' });
+            best.area.style.outline = '4px solid #00FF00';
+            best.area.style.backgroundColor = 'rgba(0,255,0,0.2)';
         } catch(e) {}
         await sleep(randInt(100, 250));
         if (!callSend(actionStr)) {
             extLog(`🖱️ [IBON] 橋接失敗，改使用仿生物理點擊`);
-            await humanClick(matched);
+            await humanClick(best.area);
         }
         return;
     }
-    // 掃描上限
-    if (state.attempts >= 2) {
-        extLog(`⛔ [IBON] 已掃描 2 次未找到目標`);
+    // 找不到目標
+    extLog(`⚠️ [IBON] 關鍵字未命中任何未售完區域 (第 ${state.attempts} 次)`);
+    if (state.attempts >= 3) {
+        extLog(`⛔ [IBON] 已掃描 3 次未找到目標，停止`);
         scanner.stop();
         if (autoReload) triggerAutoReload(autoReload);
     }
     return;
-   }
+}
         // ─────────────────────────────────────────────
         // STEP_SELECT_QTY：選張數
         // ─────────────────────────────────────────────
