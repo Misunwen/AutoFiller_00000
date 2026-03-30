@@ -413,23 +413,18 @@ function runIBON(settings) {
             state.lastStep = step;
             if (step === 'STEP_SELECT_ZONE') { state.clicked = false; state.attempts = 0; }
         }
-// ─────────────────────────────────────────────
-// STEP_SELECT_ZONE：選區（完整修正版）
-// ─────────────────────────────────────────────
 if (step === 'STEP_SELECT_ZONE') {
     if (!autoClickZone) return;
     if (state.clicked) return;
-    // ✅ 無關鍵字：最優先判斷，不跑任何後續邏輯
     if (keywords.length === 0) {
         if (!state.noKwLogShown) {
             extLog(`⚠️ [IBON] 自動選區已開啟，但未設定關鍵字 → 請手動點選`);
             state.noKwLogShown = true;
         }
-        return; // ← 直接 return，不跑過濾、不印掃描 log
+        return;
     }
     state.attempts++;
     let areas = Array.from(document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]'));
-    // ✅ 售完過濾
     let availableAreas = areas.filter(area => {
         let title = area.getAttribute('title') || '';
         if (!title || title.trim() === '') return false;
@@ -439,32 +434,45 @@ if (step === 'STEP_SELECT_ZONE') {
         return true;
     });
     extLog(`🔍 [IBON] 共 ${areas.length} 個區塊，未售完 ${availableAreas.length} 個`);
-    // ✅ 有關鍵字比對
+    // ✅ 強化版比對：不用 regex flag，兩邊都 normalize
     function matchKeyword(normalizedTitle, kw) {
-        let regex = new RegExp(kw + '[區区]', 'i');
-        return regex.test(normalizedTitle);
+        let nkw = normalizeText(kw);
+        return normalizedTitle.includes(nkw + '區') || 
+               normalizedTitle.includes(nkw + '区');
     }
     let matchedAreas = [];
     for (let area of availableAreas) {
         let rawTitle = area.getAttribute('title') || '';
         let areaTitle = normalizeText(rawTitle);
-        if (keywords.some(kw => matchKeyword(areaTitle, kw))) {
+        // ✅ 找命中的最優先關鍵字 index
+        let kwIndex = -1;
+        for (let i = 0; i < keywords.length; i++) {
+            if (matchKeyword(areaTitle, keywords[i])) {
+                kwIndex = i;
+                break;
+            }
+        }
+        if (kwIndex !== -1) {
             let priceMatch = rawTitle.match(/票價[：:]\s*(\d+)/);
             let price = priceMatch ? parseInt(priceMatch[1]) : 0;
             let remainMatch = rawTitle.match(/尚餘[：:]\s*(\d+)/);
             let remain = remainMatch ? parseInt(remainMatch[1]) : 999;
             if (remain > 0) {
-                matchedAreas.push({ area, price, remain, rawTitle });
+                matchedAreas.push({ area, price, remain, rawTitle, kwIndex });
             }
         }
     }
-    matchedAreas.sort((a, b) => b.price - a.price || b.remain - a.remain);
+    // ✅ 關鍵字順序 → 票價 → 尚餘
+    matchedAreas.sort((a, b) => 
+        a.kwIndex - b.kwIndex || 
+        b.price - a.price || 
+        b.remain - a.remain
+    );
     if (matchedAreas.length > 0) {
         matchedAreas.forEach((item, i) => {
-            extLog(`🏷️ 候選第${i + 1}名 票價${item.price} 尚餘${item.remain}：${item.rawTitle.slice(0, 50)}`);
+            extLog(`🏷️ 候選第${i+1}名 [KW順序:${item.kwIndex}] 票價${item.price} 尚餘${item.remain}：${item.rawTitle.slice(0, 50)}`);
         });
         let best = matchedAreas[0];
-        let actionStr = getAreaAction(best.area);
         extLog(`🎯 [IBON] 命中目標！${best.rawTitle.slice(0, 60)}`);
         state.clicked = true;
         try {
@@ -473,13 +481,13 @@ if (step === 'STEP_SELECT_ZONE') {
             best.area.style.backgroundColor = 'rgba(0,255,0,0.2)';
         } catch(e) {}
         await sleep(randInt(100, 250));
+        let actionStr = getAreaAction(best.area);
         if (!callSend(actionStr)) {
             extLog(`🖱️ [IBON] 橋接失敗，改使用仿生物理點擊`);
             await humanClick(best.area);
         }
         return;
     }
-    // 找不到目標
     extLog(`⚠️ [IBON] 關鍵字未命中任何未售完區域 (第 ${state.attempts} 次)`);
     if (state.attempts >= 3) {
         extLog(`⛔ [IBON] 已掃描 3 次未找到目標，停止`);
