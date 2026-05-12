@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "一定是(ゝ∀･)b",
-  "version": "7.6.0",
+  "version": "9.0.0",
   "description": "(ゝ∀･)b",
   "icons": {
     "16": "icon.png",
@@ -39,8 +39,13 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["inject.js"],
-      "matches": ["*://*.ibon.com.tw/*"]
+      "resources": ["inject.min.js", "icon.png"],
+      "matches": [
+        "*://*.tixcraft.com/*",
+        "*://*.kktix.cc/*",
+        "*://*.kktix.com/*",
+        "*://*.ibon.com.tw/*"
+      ]
     }
   ]
 }
