@@ -23,14 +23,83 @@ if (
         document.addEventListener('DOMContentLoaded', injectScript);
     }
 }
+// ✅ 全局掃描器管理
+let globalIBONScanner = null;
+
+function startAutoFill() {
+    let platform = detectPlatform();
+    if (platform === 'UNKNOWN') return;
+    
+    let flagKey = `hasStartedAutoFill_${platform}`;
+    if (window[flagKey]) return;
+    window[flagKey] = true;
+    
+    chrome.storage.sync.get(
+        ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords'],
+        function(data) {
+            let raw = data || {};
+            let settings = {
+                autoCheck:     raw.autoCheck     === true,
+                autoReload:    raw.autoReload    === true,
+                autoClickZone: raw.autoClickZone === true,
+                dropdownValue: raw.dropdownValue || "none",
+                zoneKeywords:  raw.zoneKeywords  || ""
+            };
+            
+            // ✅ 停止舊的掃描器
+            if (globalIBONScanner) {
+                globalIBONScanner.stop();
+                globalIBONScanner = null;
+            }
+            
+            extLog(`🚀 [路由] 平台：${platform}`);
+            extLog(`🚀 [路由] 讀取設定：`);
+            extLog(`  - autoCheck: ${settings.autoCheck}`);
+            extLog(`  - autoReload: ${settings.autoReload}`);
+            extLog(`  - autoClickZone: ${settings.autoClickZone}`);
+            extLog(`  - dropdownValue: ${settings.dropdownValue}`);
+            extLog(`  - zoneKeywords: ${settings.zoneKeywords}`);
+            
+            if      (platform === 'TIXCRAFT') runTixCraft(settings);
+            else if (platform === 'KKTIX')    runKKTIX(settings);
+            else if (platform === 'IBON')     runIBON(settings);
+        }
+    );
+}
+
+// ✅ 監聽自動檢測勾選
+if (typeof chrome !== 'undefined' && chrome.storage) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'sync' && changes.autoCheck) {
+            if (changes.autoCheck.newValue === true) {
+                startAutoFill();  // ✅ 自動觸發
+            }
+        }
+    });
+}
+
+// ✅ 頁面載入時檢查設定
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(startAutoFill, 1000);  // 延遲1秒確保DOM準備好
+    });
+} else {
+    setTimeout(startAutoFill, 1000);
+}
+
+
 // -------------------------------------------------------------------------
 // 🛠️ 共通武器庫
 // -------------------------------------------------------------------------
 window.botLogs = [];
 
 // ① 最底層工具（無依賴）
-function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
-function randFloat(min, max) { return Math.random() * (max - min) + min; }
+function randInt(min, max) { 
+    return Math.floor(Math.random() * (max - min + 1)) + min; 
+}
+function randFloat(min, max) { 
+    return Math.random() * (max - min) + min; 
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ② 文字處理
@@ -67,46 +136,46 @@ function updateHUD(msg) {
         hud.innerText = msg;
     } catch (e) {}
 }
-function extLog(msg) {
+
+// ✅ 擴展日誌輸出
+function extLog(message) {
     let time = new Date().toLocaleTimeString('zh-TW', {
         hour12: false,
         fractionalSecondDigits: 3
     });
-    let fullMsg = `[${time}] ${msg}`;
+    let fullMsg = `[${time}] ${message}`;
     console.info(
         `%c🤖 搶票特工 %c ${fullMsg}`,
         'background: #00ff00; color: #000; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px;',
         'color: #00ff00; font-weight: bold; font-size: 12px; background: #222; padding: 2px 6px; border-radius: 4px;'
     );
     window.botLogs.push(fullMsg);
-    updateHUD(msg);
+    updateHUD(message);
 }
 
 // ⓪ 反偵測注入（extLog 定義後才執行）
 (function injectAntiDetection() {
     try {
-        // ✅ 對策一：讓 toString() 看起來像原生函式
         const _orig = EventTarget.prototype.addEventListener;
         const _origRemove = EventTarget.prototype.removeEventListener;
+        
         function makeNativeLike(fn, name) {
-            // 覆蓋 toString 讓它回傳原生函式字串
             Object.defineProperty(fn, 'name', { value: name, configurable: true });
             fn.toString = function() {
                 return `function ${name}() { [native code] }`;
             };
-            // 讓 toString 本身也看起來正常
             fn.toString.toString = function() {
                 return 'function toString() { [native code] }';
             };
             return fn;
         }
-        // ✅ 對策二：覆蓋 isTrusted
+        
         Object.defineProperty(Event.prototype, 'isTrusted', {
             get: function() { return true; },
             configurable: true,
             enumerable: true
         });
-        // ✅ 對策三：攔截 addEventListener 並偽裝成原生
+        
         const wrappedAddEventListener = function(type, fn, opts) {
             if (typeof fn !== 'function') return _orig.call(this, type, fn, opts);
             function wrapped(e) {
@@ -123,21 +192,20 @@ function extLog(msg) {
         };
         makeNativeLike(wrappedAddEventListener, 'addEventListener');
         EventTarget.prototype.addEventListener = wrappedAddEventListener;
-        // ✅ 對策四：攔截 removeEventListener 並偽裝成原生
+        
         const wrappedRemoveEventListener = function(type, fn, opts) {
             return _origRemove.call(this, type, fn?._wrapped || fn, opts);
         };
         makeNativeLike(wrappedRemoveEventListener, 'removeEventListener');
         EventTarget.prototype.removeEventListener = wrappedRemoveEventListener;
-        // ✅ 對策五：網站用 new Event() 測試 isTrusted 時也回傳 true
-        // 已經被 Event.prototype 的 getter 覆蓋處理
+        
         extLog('✅ 反偵測注入成功');
     } catch(e) {
         extLog('⚠️ 反偵測注入失敗: ' + e.message);
     }
 })();
 
-// ④ 人類模擬輸入（依賴 sleep, randInt）
+// ④ 人類模擬輸入
 async function simulateHumanInput(targetElement, value) {
     try {
         let proto = targetElement.tagName.toLowerCase() === 'select'
@@ -159,7 +227,7 @@ async function simulateHumanInput(targetElement, value) {
     } catch(e) {}
 }
 
-// ⑤ 滑鼠移動軌跡（依賴 sleep, randInt, randFloat）
+// ⑤ 滑鼠移動軌跡
 async function moveMouseTo(el) {
     try {
         let rect = el.getBoundingClientRect();
@@ -190,7 +258,7 @@ async function moveMouseTo(el) {
     } catch(e) {}
 }
 
-// ⑥ 人類模擬點擊（依賴 moveMouseTo, sleep, randInt, randFloat）
+// ⑥ 人類模擬點擊
 async function humanClick(el) {
     if (!el) return;
     try {
@@ -199,6 +267,7 @@ async function humanClick(el) {
         let rect = el.getBoundingClientRect();
         let cx = rect.left + randFloat(rect.width * 0.25, rect.width * 0.75);
         let cy = rect.top  + randFloat(rect.height * 0.25, rect.height * 0.75);
+        
         const make = (type, extra = {}) => {
             let isPointer  = type.startsWith('pointer');
             let EventClass = isPointer ? PointerEvent : MouseEvent;
@@ -212,6 +281,7 @@ async function humanClick(el) {
             if (isPointer) { opts.pointerId = 1; opts.pointerType = 'mouse'; opts.isPrimary = true; }
             return new EventClass(type, opts);
         };
+        
         el.focus();
         await sleep(randInt(10, 30));
         el.dispatchEvent(make('pointerover'));
@@ -235,19 +305,18 @@ async function humanClick(el) {
 // ⑦ 其他工具
 function isQuantitySelect(sel) {
     let opts = Array.from(sel.options).map(o => o.value.trim().toLowerCase());
-    
-    // 更寬鬆的判斷
     return (
-        // 數字型 value
         opts.some(v => /^\d+$/.test(v) && parseInt(v) >= 1 && parseInt(v) <= 10) ||
-        // 含數字的 value
         opts.some(v => /qty|num|count|張|ticket/i.test(v)) ||
-        // 選項文字包含張數
         Array.from(sel.options).some(o => /^\d+\s*張/.test(o.text.trim()))
     );
 }
+
+// ⑧ 不規則間隔執行
 function makeIrregularInterval(callback, baseMs, jitterMs) {
-    let stopped = false; let timerId;
+    let stopped = false;
+    let timerId;
+    
     function next() {
         if (stopped) return;
         let delay;
@@ -258,15 +327,32 @@ function makeIrregularInterval(callback, baseMs, jitterMs) {
             delay = Math.max(50, baseMs + randInt(-jitterMs, jitterMs));
         }
         timerId = setTimeout(async () => {
-            try { await callback(); } catch(e) { console.error(e); }
+            try { 
+                await callback(); 
+            } catch(e) { 
+                console.error(e); 
+            }
             next();
         }, delay);
     }
+    
     next();
-    return { stop() { stopped = true; clearTimeout(timerId); } };
+    
+    return { 
+        stop() { 
+            stopped = true; 
+            clearTimeout(timerId); 
+        },
+        resume() {
+            if (stopped) {
+                stopped = false;
+                next();
+            }
+        }
+    };
 }
 
-// ⑧ 自動重整
+// ⑨ 自動重整
 window.isReloading = false;
 async function triggerAutoReload(autoReloadOpt) {
     if (window.isReloading || !autoReloadOpt) return;
@@ -275,6 +361,205 @@ async function triggerAutoReload(autoReloadOpt) {
     extLog(`🔄 [重整] 售完或無目標，準備自動重整...`);
     await sleep(waitTime);
     window.location.reload();
+}
+
+// ⑩ IBON 專用函數
+function isAreaSoldOut(area) {
+    if (!area) return true;
+    
+    let title = area.getAttribute('title') || '';
+    let parent = area.parentElement;
+    let svg = parent ? parent.querySelector('ellipse, circle, path') : null;
+    
+    let matchRemain = title.match(/尚餘[：:]\s*(\d+)/);
+    if (matchRemain) {
+        let remain = parseInt(matchRemain[1]);
+        return remain === 0;
+    }
+    
+    if (svg) {
+        let fill = svg.getAttribute('fill') || '';
+        if (fill.toLowerCase().includes('gray') || fill.toLowerCase().includes('#999') || fill.toLowerCase().includes('#ccc')) {
+            return true;
+        }
+    }
+    
+    if (parent) {
+        let classes = parent.getAttribute('class') || '';
+        if (classes.includes('disabled') || classes.includes('sold') || classes.includes('unavailable')) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+function isTableRowSoldOut(tr) {
+    if (!tr) return true;
+    
+    let text = tr.innerText || '';
+    let matchRemain = text.match(/尚餘[：:]\s*(\d+)/);
+    if (matchRemain) {
+        let remain = parseInt(matchRemain[1]);
+        return remain === 0;
+    }
+    
+    let classes = tr.getAttribute('class') || '';
+    if (classes.includes('disabled') || classes.includes('sold') || classes.includes('unavailable')) {
+        return true;
+    }
+    
+    return false;
+}
+
+function matchKeyword(text, keyword) {
+    let normalized = normalizeText(text);
+    let kwNormalized = normalizeText(keyword);
+    return normalized.includes(kwNormalized);
+}
+
+function analyzeKeywordType(keywords) {
+    if (!keywords || keywords.length === 0) {
+        return { type: 'NONE', value: null };
+    }
+    
+    let first = keywords[0].trim();
+    let num = parseInt(first);
+    
+    if (!isNaN(num) && num > 0) {
+        return { type: 'PRICE', value: num };
+    } else if (first) {
+        return { type: 'ZONE', value: first };
+    }
+    
+    return { type: 'NONE', value: null };
+}
+
+function detectIBONStep() {
+    let pageText = document.body.innerText || '';
+    
+    // ✅ 偵測步驟前先輸出頁面信息
+    let areas = document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]');
+    let tableRows = document.querySelectorAll('tr[rel]');
+    let qtySelect = document.querySelector('select[name*="Qty"], select[name*="qty"]');
+    
+    extLog(`\n🔍 [DEBUG] 頁面結構分析：`);
+    extLog(`  - area 元素：${areas.length} 個`);
+    extLog(`  - tr[rel] 元素：${tableRows.length} 個`);
+    extLog(`  - 數量 select：${qtySelect ? '✅ 找到' : '❌ 找不到'}`);
+    extLog(`  - 頁面包含「購買張數」：${pageText.includes('購買張數') ? '✅ 是' : '❌ 否'}`);
+    extLog(`  - 頁面包含「確認訂單」：${pageText.includes('確認訂單') ? '✅ 是' : '❌ 否'}`);
+    
+    // 嘗試更寬鬆的選擇器
+    let allAreas = document.querySelectorAll('area');
+    let allSelects = document.querySelectorAll('select');
+    let allTrs = document.querySelectorAll('tr');
+    
+    extLog(`  - 所有 area：${allAreas.length} 個`);
+    extLog(`  - 所有 select：${allSelects.length} 個`);
+    extLog(`  - 所有 tr：${allTrs.length} 個\n`);
+    
+    // ✅ 優先級1：確認頁
+    if (pageText.includes('確認訂單')) {
+        return 'STEP_CONFIRM';
+    }
+    
+    // ✅ 優先級2：選區頁（area 或 tr[rel]）
+    if (areas.length > 0 || tableRows.length > 0) {
+        return 'STEP_SELECT_ZONE';
+    }
+    
+    // ✅ 優先級3：數量頁
+    if (pageText.includes('購買張數') || qtySelect) {
+        return 'STEP_SELECT_QTY';
+    }
+    
+    // ✅ 優先級4：等待頁
+    return 'STEP_WAITING';
+}
+
+
+function detectIBONSelectionMode() {
+    let areas = document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]');
+    if (areas.length > 0) {
+        extLog(`🔍 [偵測模式] 發現 ${areas.length} 個 area 標籤 → MAP_MODE`);
+        return 'MAP_MODE';
+    }
+    
+    let tableRows = document.querySelectorAll('tr[rel]');
+    if (tableRows.length > 0) {
+        extLog(`🔍 [偵測模式] 發現 ${tableRows.length} 個 table row → TABLE_MODE`);
+        return 'TABLE_MODE';
+    }
+    
+    extLog(`🔍 [偵測模式] 沒有發現任何選區元素 → UNKNOWN`);
+    return 'UNKNOWN';
+}
+
+function getAreaAction(area) {
+    let href = area.getAttribute('href') || '';
+    let onclick = area.getAttribute('onclick') || '';
+    
+    if (href) {
+        let match = href.match(/Send\('([^']+)'\)/);
+        if (match) return match[1];
+    }
+    
+    if (onclick) {
+        let match = onclick.match(/Send\('([^']+)'\)/);
+        if (match) return match[1];
+    }
+    
+    return '';
+}
+
+function callSend(actionStr) {
+    if (!actionStr || typeof window.Send !== 'function') {
+        return false;
+    }
+    try {
+        window.Send(actionStr);
+        return true;
+    } catch(e) {
+        return false;
+    }
+}
+
+function isDynamicMap() {
+    return document.querySelector('canvas') !== null || document.querySelector('[data-map-type="dynamic"]') !== null;
+}
+
+// ⑪ 平台偵測
+function detectPlatform() {
+    let hostname = window.location.hostname;
+    let href = window.location.href;
+    
+    if (hostname.includes('ibon') || href.includes('UTK0201')) {
+        return 'IBON';
+    }
+    if (hostname.includes('tixcraft') || hostname.includes('ticketcraft')) {
+        return 'TIXCRAFT';
+    }
+    if (hostname.includes('kktix')) {
+        return 'KKTIX';
+    }
+    
+    return 'UNKNOWN';
+}
+
+// ⑫ 修復錯誤
+function patchIbonErrors() {
+    if (window.__patchedIbonErrors) return;
+    window.__patchedIbonErrors = true;
+    
+    let originalConsoleError = console.error;
+    console.error = function(...args) {
+        let msg = args[0] ? args[0].toString() : '';
+        if (msg.includes('Cannot read') || msg.includes('undefined')) {
+            return;
+        }
+        originalConsoleError.apply(console, args);
+    };
 }
 
 
@@ -566,7 +851,7 @@ function runKKTIX(settings) {
                             for (let i = 0; i < dropdownValue; i++) {
                                 await humanClick(plusBtn);
                                 if (i < dropdownValue - 1) {
-                                    await sleep(randInt(150, 400) + randInt(0, 80));
+                                    await sleep(randInt(10, 50) + randInt(0, 10));
                                 }
                             }
                             extLog(`✅ [KKTIX] 已完成 ${dropdownValue} 張！請手動完成驗證碼！`);
@@ -588,9 +873,10 @@ function runKKTIX(settings) {
     loop();
 }
 
-// -------------------------------------------------------------------------
-// 🟠 IBON 完整版（修正版）
-// -------------------------------------------------------------------------
+// =========================================================================
+// 🟠 IBON 完整版（支援票價/票區雙邏輯 + 完整 DEBUG）
+// =========================================================================
+
 function patchIbonErrors() {
     try {
         let container = document.body || document.documentElement;
@@ -605,14 +891,17 @@ function patchIbonErrors() {
         });
     } catch (e) {}
 }
+
 function getAreaAction(area) {
     return area.getAttribute('href') || area.getAttribute('onclick') || '';
 }
+
 function isDynamicMap() {
     let el = document.getElementById('ctl00_ContentPlaceHolder1_show_dynamic_map');
     if (!el) return false;
     return el.value != '0' && el.value !== '' && el.value != null;
 }
+
 function callSend(actionStr) {
     if (!actionStr) return false;
     if (isDynamicMap()) return false;
@@ -625,236 +914,575 @@ function callSend(actionStr) {
     }, '*');
     return true;
 }
-// ✅ 修正一：isQuantitySelect 更嚴謹
+
 function isQuantitySelect(sel) {
-    // IBON 數量選單通常 name/id 包含這些關鍵字
     let name = (sel.name || sel.id || '').toLowerCase();
-    if (/ticketcount|ticket.*count|qty|quantity/i.test(name)) return true;
-    // 備用：選項全為純數字且範圍在 1~10，且至少有兩個
+    if (/ticketcount|ticket.*count|qty|quantity|amount/i.test(name)) return true;
     let opts = Array.from(sel.options).map(o => o.value.trim());
     let numericOpts = opts.filter(v => /^\d+$/.test(v) && parseInt(v) >= 1 && parseInt(v) <= 10);
     return numericOpts.length >= 2;
 }
-// ✅ 修正二：detectIBONStep 判斷順序調整（確認頁 → 數量 → 選區）
-function detectIBONStep() {
-    // 先判斷確認頁（最終態）
-    if (document.querySelector('#btnPay, .btn-pay, [id*="pay" i]'))
-        return 'STEP_CONFIRM';
-    // 再判斷數量選擇（中間態）
-    let qtySelects = Array.from(document.querySelectorAll('select:not([disabled])'))
-                         .filter(isQuantitySelect);
-    if (qtySelects.length > 0) return 'STEP_SELECT_QTY';
-    // 最後判斷選區（初始態）
+
+// ✅ 判斷輸入是票價還是票區（只定義一次）
+function analyzeKeywordType(keywords) {
+    if (keywords.length === 0) return { type: 'NONE', value: null };
+    
+    let keyword = keywords[0];
+    let trimmed = keyword.trim();
+    
+    // 檢查是否為純數字（票價）
+    if (/^\d+$/.test(trimmed)) {
+        extLog(`💰 [關鍵字分析] 偵測到票價：${trimmed}`);
+        return { type: 'PRICE', value: parseInt(trimmed) };
+    }
+    
+    // 否則視為票區名稱
+    extLog(`🏷️ [關鍵字分析] 偵測到票區：${trimmed}`);
+    return { type: 'ZONE', value: normalizeText(trimmed) };
+}
+
+// ✅ 偵測選擇區域的模式（表格或地圖）
+function detectIBONSelectionMode() {
+    // ✅ 修正：優先檢查表格，再檢查地圖
+    let tableRows = document.querySelectorAll('tr[rel]');
+    if (tableRows.length > 0) {
+        extLog(`🔍 [偵測模式] 發現 ${tableRows.length} 個 tr[rel] → TABLE_MODE`);
+        return 'TABLE_MODE';
+    }
+    
     let areas = document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]');
-    if (areas.length > 0) return 'STEP_SELECT_ZONE';
+    if (areas.length > 0) {
+        extLog(`🔍 [偵測模式] 發現 ${areas.length} 個 area 標籤 → MAP_MODE`);
+        return 'MAP_MODE';
+    }
+
+    extLog(`🔍 [偵測模式] 沒有發現任何選區元素 → UNKNOWN`);
+    return 'UNKNOWN';
+}
+
+// ✅ 偵測 IBON 步驟（只定義一次，支援新舊格式）
+function detectIBONStep() {
+    let pageText = document.body.innerText || '';
+    
+    // ✅ 優先級1：確認頁
+    if (pageText.includes('確認訂單')) {
+        return 'STEP_CONFIRM';
+    }
+    
+    // ✅ 優先級2：選區頁（area 或 tr[rel]）
+    let areas = document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]');
+    let tableRows = document.querySelectorAll('tr[rel]');
+    if (areas.length > 0 || tableRows.length > 0) {
+        return 'STEP_SELECT_ZONE';
+    }
+    
+    // ✅ 優先級3：數量頁（支援新舊格式）
+    let amountSelects = document.querySelectorAll('select[name*="AMOUNT_DDL"]');
+    let qtySelects = document.querySelectorAll('select[name*="Qty"], select[name*="qty"]');
+    if (amountSelects.length > 0 || qtySelects.length > 0 || pageText.includes('購買張數')) {
+        return 'STEP_SELECT_QTY';
+    }
+    
+    // ✅ 優先級4：等待頁
     return 'STEP_WAITING';
 }
-function runIBON(settings) {
+
+// ✅ 下面接 runIBON() 函數...
+
+
+async function runIBON(settings) {
     patchIbonErrors();
     let autoClickZone = settings.autoClickZone === true;
     let zoneKeywords  = settings.zoneKeywords  || "";
-    let dropdownValue = settings.dropdownValue || "none";
-    let autoReload    = settings.autoReload    === true;
-    extLog(`🚀 [IBON] 啟動 | 自動選區：${autoClickZone ? '開' : '關'} | 目標：${zoneKeywords || '無'} | 張數：${dropdownValue}`);
+    let dropdownValue = settings.dropdownValue || "1";
+    let autoReload    = settings.autoReload === true || settings.autoReload === 'true';
+    
+    extLog(`🚀 [IBON] ════════════════════════════════════════`);
+    extLog(`🚀 [IBON] 啟動設定`);
+    extLog(`🚀 [IBON] 自動選區：${autoClickZone ? '✅ 開' : '❌ 關'}`);
+    extLog(`🚀 [IBON] 目標：${zoneKeywords || '(未設定)'}`);
+    extLog(`🚀 [IBON] 購買張數：${dropdownValue}`);
+    extLog(`🚀 [IBON] 自動重整：${autoReload ? '✅ 開' : '❌ 關'}`);
+    extLog(`🚀 [IBON] ════════════════════════════════════════`);
+
     let state = {
-        lastStep:      '',
-        attempts:      0,
-        clicked:       false,
-        clickedAt:     0,          // ✅ 修正三：記錄點擊時間
-        qtyDone:       false,
-        noKwLogShown:  false,
-        noHitLogShown: false,
-        lastAreaCount: -1,
-        startTime:     null        // ✅ 修正四：記錄開始掃描時間
+        lastStep:               '',
+        attempts:               0,
+        clicked:                false,
+        clickedAt:              0,
+        qtyDone:                false,
+        noKwLogShown:           false,
+        noHitLogShown:          false,
+        lastAreaCount:          -1,
+        startTime:              null,
+        selectionMode:          null,
+        lastDOM:                null,
+        keywordType:            null,
+        keywordValue:           null,
+        scanCompleted:          false,
+        manualClickPromptShown: false
     };
+
     let keywords = zoneKeywords
         .split(/,|，/)
-        .map(k => normalizeText(k.trim()))
+        .map(k => k.trim())
         .filter(Boolean);
-    function matchKeyword(normalizedTitle, kw) {
-        let nkw = normalizeText(kw);
-        if (!nkw) return false;
-        if (nkw.endsWith('區') || nkw.endsWith('区')) {
-            return normalizedTitle.includes(nkw);
-        }
-        return normalizedTitle.includes(nkw + '區') ||
-               normalizedTitle.includes(nkw + '区') ||
-               normalizedTitle.includes(nkw);
+
+    let keywordInfo = analyzeKeywordType(keywords);
+    state.keywordType = keywordInfo.type;
+    state.keywordValue = keywordInfo.value;
+
+    extLog(`💰 [關鍵字分析] 偵測到${state.keywordType === 'PRICE' ? '票價' : '票區'}：${state.keywordValue}`);
+    await sleep(randInt(500, 1500));
+
+    // ✅ 停止舊的掃描器
+    if (globalIBONScanner) {
+        extLog(`⏹️ [IBON] 停止舊掃描器`);
+        globalIBONScanner.stop();
     }
-    let scanner = makeIrregularInterval(async () => {
+
+    // ✅ 建立新的掃描器並存到全局變數
+    globalIBONScanner = makeIrregularInterval(async () => {
         if (window.isReloading) return;
+
         let step = detectIBONStep();
+
+        let currentDOM = document.body.innerHTML.length;
+        if (state.lastDOM !== null && Math.abs(state.lastDOM - currentDOM) > 1000) {
+            extLog('⚠️ [IBON] 偵測到 DOM 大幅改變，重置點擊狀態');
+            state.clicked   = false;
+            state.clickedAt = 0;
+        }
+        state.lastDOM = currentDOM;
+
+        // ✅ 如果步驟未知，停止掃描（在更新 lastStep 之前）
+        if (step === 'STEP_WAITING') {
+            if (state.lastStep !== 'STEP_WAITING') {
+                extLog(`\n⏸️ [IBON] 進入等待狀態，停止掃描`);
+                extLog(`⏸️ [IBON] 請前往搶票頁面\n`);
+                globalIBONScanner.stop();
+                globalIBONScanner = null;
+            }
+            return;
+        }
+
+        // ✅ 只有在非 STEP_WAITING 時才更新 lastStep
         if (step !== state.lastStep) {
-            extLog(`📄 [IBON] 步驟切換：${state.lastStep || '初始'} → ${step}`);
+            extLog(`\n📄 ════════════════════════════════════════`);
+            extLog(`📄 [IBON] 步驟切換：${state.lastStep || '【初始】'} → ${step}`);
+            extLog(`📄 ════════════════════════════════════════\n`);
             state.lastStep = step;
+            state.selectionMode = detectIBONSelectionMode();
+
             if (step === 'STEP_SELECT_ZONE') {
                 state.clicked       = false;
                 state.clickedAt     = 0;
                 state.attempts      = 0;
                 state.noHitLogShown = false;
                 state.lastAreaCount = -1;
-                state.startTime     = null; // ✅ 重置計時器
+                state.startTime     = null;
+                extLog(`✅ [IBON] 進入選區步驟，狀態已重置`);
             }
+
             if (step === 'STEP_SELECT_QTY') {
-                state.qtyDone = false; // ✅ 進入數量步驟時重置
+                state.qtyDone = false;
+                extLog(`✅ [IBON] 進入數量步驟，狀態已重置`);
             }
         }
+
         // ─────────────────────────────────────────────
         // STEP_SELECT_ZONE
         // ─────────────────────────────────────────────
         if (step === 'STEP_SELECT_ZONE') {
-            if (!autoClickZone) return;
-            // ✅ 修正三：點擊後超過 3 秒沒跳轉 → 解鎖重試
+            // ✅ 新增：如果 autoClickZone 為 false，只提示一次後停止掃描
+            if (!autoClickZone) {
+                if (!state.manualClickPromptShown) {
+                    extLog(`\n🔍 ════════════════════════════════════════`);
+                    extLog(`🔍 [IBON] 自動選區已關閉`);
+                    extLog(`👆 [提示] 請手動點擊要購買的票區`);
+                    extLog(`🔍 ════════════════════════════════════════\n`);
+                    state.manualClickPromptShown = true;
+                }
+                return;  // ✅ 只 return 一次，不重複掃描
+            }
+
+            state.manualClickPromptShown = false;  // ✅ 重置標記
+
+            extLog(`\n🔍 ════════════════════════════════════════`);
+            extLog(`🔍 [IBON-DEBUG] 進入 STEP_SELECT_ZONE 邏輯`);
+            extLog(`🔍 [檢查1] autoClickZone = ${autoClickZone}`);
+            extLog(`✅ [檢查1] autoClickZone 已開啟`);
+
+            extLog(`🔍 [檢查2] state.clicked = ${state.clicked}`);
             if (state.clicked) {
-                if (Date.now() - state.clickedAt > 3000) {
-                    extLog('⚠️ [IBON] 點擊後無反應，解鎖重試...');
+                let elapsedMs = Date.now() - state.clickedAt;
+                extLog(`🔍 [檢查2] 距離上次點擊已過 ${elapsedMs}ms`);
+                if (elapsedMs > 3000) {
+                    extLog(`⚠️ [IBON-DEBUG] 超過3秒無反應，解鎖重試`);
                     state.clicked   = false;
                     state.clickedAt = 0;
                 } else {
+                    extLog(`⏳ [IBON-DEBUG] 未滿3秒，繼續等待，return`);
+                    extLog(`🔍 ════════════════════════════════════════\n`);
                     return;
                 }
             }
-            if (keywords.length === 0) {
+
+            extLog(`✅ [檢查2] 點擊狀態正常`);
+
+            extLog(`🔍 [檢查3] keywordType = ${state.keywordType}`);
+            if (state.keywordType === 'NONE') {
+                extLog(`❌ [IBON-DEBUG] 未設定目標，return`);
                 if (!state.noKwLogShown) {
-                    extLog('⚠️ [IBON] 自動選區已開啟，但未設定關鍵字 → 請手動點選');
+                    extLog('⚠️ [IBON] 自動選區已開啟，但未設定目標 → 請手動點選');
                     state.noKwLogShown = true;
                 }
+                extLog(`🔍 ════════════════════════════════════════\n`);
                 return;
             }
-            // ✅ 修正四：改用時間判斷是否觸發重整
+
+            extLog(`✅ [檢查3] 目標類型 = ${state.keywordType}，值 = ${state.keywordValue}`);
+
+            extLog(`🔍 [檢查4] selectionMode = ${state.selectionMode}`);
+            if (state.selectionMode === 'UNKNOWN') {
+                extLog(`❌ [IBON-DEBUG] selectionMode 未知，return`);
+                extLog(`🔍 ════════════════════════════════════════\n`);
+                return;
+            }
+
+            extLog(`✅ [檢查4] selectionMode = ${state.selectionMode}`);
+            extLog(`🔍 ════════════════════════════════════════\n`);
+
             if (!state.startTime) state.startTime = Date.now();
             state.attempts++;
-            let areas = Array.from(
-                document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]')
-            );
-            let availableAreas = areas.filter(area => {
-                let title = area.getAttribute('title') || '';
-                if (!title || title.trim() === '') return false;
-                if (title.includes('已售完') || title.includes('售完')) return false;
-                let remainMatch = title.match(/尚餘[：:]\s*(\d+)/);
-                if (remainMatch && parseInt(remainMatch[1]) === 0) return false;
-                return true;
-            });
-            if (areas.length !== state.lastAreaCount) {
-                state.lastAreaCount = areas.length;
-                extLog(`🔍 [IBON] 共 ${areas.length} 個區塊，未售完 ${availableAreas.length} 個`);
-            }
-            let matchedAreas = [];
-            for (let area of availableAreas) {
-                let rawTitle  = area.getAttribute('title') || '';
-                let areaTitle = normalizeText(rawTitle);
-                let kwIndex   = -1;
-                for (let i = 0; i < keywords.length; i++) {
-                    if (matchKeyword(areaTitle, keywords[i])) {
-                        kwIndex = i;
-                        break;
+
+            // ─── 表格模式 ───
+            if (state.selectionMode === 'TABLE_MODE') {
+                extLog(`\n📊 ════════════════════════════════════════`);
+                extLog(`📊 [表格模式] 開始掃描...`);
+                extLog(`📊 [目標類型] ${state.keywordType === 'PRICE' ? '💰 票價' : '🏷️ 票區'}`);
+                extLog(`📊 ════════════════════════════════════════\n`);
+
+                let tableRows = Array.from(document.querySelectorAll('tr[rel]'));
+                extLog(`📊 [掃描] 找到 ${tableRows.length} 個 table row`);
+
+                let availableRows = tableRows.filter(tr => {
+                    let isSoldOut = isTableRowSoldOut(tr);
+                    if (!isSoldOut) {
+                        let zoneTd = tr.querySelector('td[data-title="票區"]');
+                        let zoneName = zoneTd ? zoneTd.innerText : '(未知)';
+                        extLog(`  ✅ 可用：${zoneName} (id=${tr.id})`);
                     }
+                    return !isSoldOut;
+                });
+
+                extLog(`📊 [篩選] 已售完 ${tableRows.length - availableRows.length} 行，可用 ${availableRows.length} 行`);
+
+                if (tableRows.length !== state.lastAreaCount) {
+                    state.lastAreaCount = tableRows.length;
                 }
-                if (kwIndex !== -1) {
-                    let priceMatch  = rawTitle.match(/票價[：:]\s*(\d+)/);
-                    let price       = priceMatch ? parseInt(priceMatch[1]) : 0;
-                    let remainMatch = rawTitle.match(/尚餘[：:]\s*(\d+)/);
-                    let remain      = remainMatch ? parseInt(remainMatch[1]) : 999;
-                    if (remain > 0) {
-                        matchedAreas.push({ area, price, remain, rawTitle, kwIndex });
+
+                let matchedRows = [];
+
+                if (state.keywordType === 'PRICE') {
+                    extLog(`\n💰 [票價模式] 尋找票價 ${state.keywordValue} 的第一個可用票區...`);
+                    
+                    for (let tr of availableRows) {
+                        let priceTd = tr.querySelector('td[data-title="票價(NT$)"]');
+                        let priceText = priceTd ? priceTd.innerText : '';
+                        let price = parseInt(priceText.replace(/[^0-9]/g, '')) || 0;
+
+                        if (price === state.keywordValue) {
+                            let zoneTd = tr.querySelector('td[data-title="票區"]');
+                            let zoneName = zoneTd ? zoneTd.innerText : '(未知)';
+                            extLog(`  💰 命中票價 ${price}：${zoneName} (id=${tr.id})`);
+                            matchedRows.push({ tr, price, zoneName, kwIndex: 0 });
+                        }
                     }
+
+                } else if (state.keywordType === 'ZONE') {
+                    extLog(`\n🏷️ [票區模式] 尋找票區名稱包含 "${state.keywordValue}" 的區域，優先高票價...`);
+                    
+                    for (let tr of availableRows) {
+                        let zoneTd = tr.querySelector('td[data-title="票區"]');
+                        let zoneName = zoneTd ? normalizeText(zoneTd.innerText) : normalizeText(tr.innerText);
+                        
+                        if (matchKeyword(zoneName, state.keywordValue)) {
+                            let priceTd = tr.querySelector('td[data-title="票價(NT$)"]');
+                            let priceText = priceTd ? priceTd.innerText : '';
+                            let price = parseInt(priceText.replace(/[^0-9]/g, '')) || 0;
+
+                            extLog(`  🏷️ 命中票區：${zoneName} (票價 ${price}) (id=${tr.id})`);
+                            matchedRows.push({ tr, price, zoneName, kwIndex: 0 });
+                        }
+                    }
+
+                    matchedRows.sort((a, b) => b.price - a.price);
+                    extLog(`\n🏷️ [排序] 按票價從高到低排序：${matchedRows.length} 個符合`);
                 }
-            }
-            matchedAreas.sort((a, b) =>
-                a.kwIndex - b.kwIndex ||
-                b.price   - a.price   ||
-                b.remain  - a.remain
-            );
-            if (matchedAreas.length > 0) {
+
+                extLog(`\n📊 [結果] 共 ${matchedRows.length} 行符合條件`);
+
+                if (matchedRows.length > 0) {
+                    state.noHitLogShown = false;
+                    matchedRows.forEach((item, i) => {
+                        extLog(`  🏷️ 候選 #${i+1}：${item.zoneName} (票價 ${item.price})`);
+                    });
+
+                    let best = matchedRows[0];
+                    
+                    if (isTableRowSoldOut(best.tr)) {
+                        extLog(`❌ [ERROR] 最佳選擇已售完！${best.zoneName} | 重新掃描中...`);
+                        extLog(`📊 ════════════════════════════════════════\n`);
+                        state.noHitLogShown = false;
+                        return;
+                    }
+
+                    extLog(`\n🎯 ════════════════════════════════════════`);
+                    extLog(`🎯 [IBON] 最終選擇：${best.zoneName}`);
+                    extLog(`🎯 [IBON] 票價：${best.price}`);
+                    extLog(`🎯 [IBON] ID：${best.tr.id}`);
+                    extLog(`🎯 ════════════════════════════════════════\n`);
+
+                    state.clicked   = true;
+                    state.clickedAt = Date.now();
+
+                    try {
+                        best.tr.scrollIntoView({ behavior: 'instant', block: 'center' });
+                        best.tr.style.outline         = '4px solid #00FF00';
+                        best.tr.style.backgroundColor = 'rgba(0,255,0,0.2)';
+                        extLog(`✅ [IBON] 已高亮選區`);
+                    } catch(e) {}
+                    
+                    await sleep(randInt(100, 250));
+
+                    let onclick = best.tr.getAttribute('onclick') || '';
+                    if (onclick) {
+                        extLog(`🖱️ [IBON] 執行 onclick：${onclick.slice(0, 100)}`);
+                        try {
+                            let script = onclick.replace(/^javascript:/i, '').trim();
+                            eval(script);
+                            extLog(`✅ [IBON] onclick 執行成功`);
+                        } catch(e) {
+                            extLog(`⚠️ [IBON] onclick 失敗：${e.message}`);
+                            await humanClick(best.tr);
+                        }
+                    } else {
+                        extLog(`🖱️ [IBON] 無 onclick，使用 humanClick`);
+                        await humanClick(best.tr);
+                    }
+                    return;
+                }
+
+                if (!state.noHitLogShown) {
+                    let msg = state.keywordType === 'PRICE' 
+                        ? `⚠️ [IBON] 票價 ${state.keywordValue} 無可用票區，繼續等待...`
+                        : `⚠️ [IBON] 票區 "${state.keywordValue}" 無可用區域，繼續等待...`;
+                    extLog(msg);
+                    state.noHitLogShown = true;
+                }
+
+                extLog(`📊 ════════════════════════════════════════\n`);
+
+            } else if (state.selectionMode === 'MAP_MODE') {
+                // ─── 地圖模式 ───
+                extLog(`\n🗺️ ════════════════════════════════════════`);
+                extLog(`🗺️ [地圖模式] 開始掃描...`);
+                extLog(`🗺️ [目標類型] ${state.keywordType === 'PRICE' ? '💰 票價' : '🏷️ 票區'}`);
+                extLog(`🗺️ ════════════════════════════════════════\n`);
+
+                let areas = Array.from(
+                    document.querySelectorAll('area[href*="Send"], area[onclick*="Send"]')
+                );
+                extLog(`🗺️ [掃描] 找到 ${areas.length} 個 area 標籤`);
+
+                extLog(`\n🗺️ [售完檢查]:`);
+                let availableAreas = areas.filter(area => !isAreaSoldOut(area));
+
+                extLog(`\n🗺️ [篩選] 已售完 ${areas.length - availableAreas.length} 個，可用 ${availableAreas.length} 個`);
+
+                if (areas.length !== state.lastAreaCount) {
+                    state.lastAreaCount = areas.length;
+                }
+
+                let matchedAreas = [];
+                
+                if (state.keywordType === 'PRICE') {
+                    extLog(`\n💰 [票價模式] 尋找票價 ${state.keywordValue}...`);
+                    for (let area of availableAreas) {
+                        let rawTitle  = area.getAttribute('title') || '';
+                        let priceMatch  = rawTitle.match(/票價[：:]\s*(\d+)/);
+                        let price       = priceMatch ? parseInt(priceMatch[1]) : 0;
+                        
+                        if (price === state.keywordValue) {
+                            extLog(`  💰 命中票價 ${price}：${rawTitle.slice(0, 60)}`);
+                            matchedAreas.push({ area, price, rawTitle, kwIndex: 0 });
+                        }
+                    }
+                } else {
+                    extLog(`\n🏷️ [票區模式] 尋找票區名稱...`);
+                    for (let area of availableAreas) {
+                        let rawTitle  = area.getAttribute('title') || '';
+                        let areaTitle = normalizeText(rawTitle);
+                        
+                        if (matchKeyword(areaTitle, state.keywordValue)) {
+                            let priceMatch  = rawTitle.match(/票價[：:]\s*(\d+)/);
+                            let price       = priceMatch ? parseInt(priceMatch[1]) : 0;
+                            extLog(`  🏷️ 命中票區：${rawTitle.slice(0, 60)} (票價 ${price})`);
+                            matchedAreas.push({ area, price, rawTitle, kwIndex: 0 });
+                        }
+                    }
+                    matchedAreas.sort((a, b) => b.price - a.price);
+                    extLog(`\n🗺️ [排序] 按票價從高到低排序：${matchedAreas.length} 個符合`);
+                }
+
+                extLog(`\n🗺️ [結果] 共 ${matchedAreas.length} 個符合條件`);
+
+                if (matchedAreas.length === 0) {
+                    extLog(`\n⛔ [IBON] 未找到符合條件的區域`);
+                    
+                    if (autoReload) {
+                        extLog(`🔄 [IBON] 已勾選「自動重整」`);
+                        let waitTime = Math.floor(Math.random() * 10000 + 5000);
+                        extLog(`⏳ [IBON] 隨機等待 ${Math.round(waitTime / 1000)} 秒後自動重整...`);
+                        globalIBONScanner.stop();
+                        globalIBONScanner = null;
+                        
+                        setTimeout(async () => {
+                            extLog(`🔄 [IBON] 觸發自動重整`);
+                            await triggerAutoReload(autoReload);
+                        }, waitTime);
+                    } else {
+                        extLog(`⚠️ [IBON] 未勾選「自動重整」`);
+                        extLog(`⏸️ [IBON] 停止掃描，等待手動 F5...`);
+                        globalIBONScanner.stop();
+                        globalIBONScanner = null;
+                    }
+                    
+                    extLog(`🗺️ ════════════════════════════════════════\n`);
+                    return;
+                }
+
                 state.noHitLogShown = false;
                 matchedAreas.forEach((item, i) => {
-                    extLog(`🏷️ 候選第${i+1}名 [KW:${item.kwIndex} 票價:${item.price} 尚餘:${item.remain}]：${item.rawTitle.slice(0, 50)}`);
+                    extLog(`  🏷️ 候選 #${i+1}：${item.rawTitle.slice(0, 60)} (票價 ${item.price})`);
                 });
+
                 let best = matchedAreas[0];
-                extLog(`🎯 [IBON] 命中目標！${best.rawTitle.slice(0, 60)}`);
-                // ✅ 修正三：記錄點擊時間
+
+                if (isAreaSoldOut(best.area)) {
+                    extLog(`❌ [ERROR] 最佳選擇已售完！${best.rawTitle.slice(0, 60)} | 重新掃描中...`);
+                    extLog(`🗺️ ════════════════════════════════════════\n`);
+                    state.noHitLogShown = false;
+                    return;
+                }
+                
+                extLog(`\n🎯 ════════════════════════════════════════`);
+                extLog(`🎯 [IBON] 最終選擇：${best.rawTitle.slice(0, 60)}`);
+                extLog(`🎯 [IBON] 票價：${best.price}`);
+                extLog(`🎯 ════════════════════════════════════════\n`);
+
                 state.clicked   = true;
                 state.clickedAt = Date.now();
+
                 try {
                     best.area.scrollIntoView({ behavior: 'instant', block: 'center' });
                     best.area.style.outline         = '4px solid #00FF00';
                     best.area.style.backgroundColor = 'rgba(0,255,0,0.2)';
                 } catch(e) {}
                 await sleep(randInt(100, 250));
+
                 if (isDynamicMap()) {
                     extLog('🖱️ [IBON] 動態地圖模式，仿生點擊');
                     await humanClick(best.area);
                 } else {
                     let actionStr = getAreaAction(best.area);
                     if (!callSend(actionStr)) {
-                        extLog('🖱️ [IBON] 靜態地圖橋接失敗，嘗試 onTicketArea2');
                         try {
                             let areaId = best.area.getAttribute('id');
                             if (areaId) {
                                 let tr = document.querySelector(`tr[rel="${areaId}"]`);
                                 if (tr && typeof onTicketArea2 === 'function') {
                                     onTicketArea2(tr);
-                                    extLog('✅ [IBON] onTicketArea2 呼叫成功');
                                 } else {
-                                    extLog('🖱️ [IBON] 無法找到 tr，改用 humanClick');
                                     await humanClick(best.area);
                                 }
-                            } else {
-                                await humanClick(best.area);
                             }
                         } catch(e) {
-                            extLog(`⚠️ [IBON] onTicketArea2 失敗：${e.message}，改用 humanClick`);
                             await humanClick(best.area);
                         }
                     }
                 }
                 return;
             }
-            if (!state.noHitLogShown) {
-                extLog('⚠️ [IBON] 關鍵字未命中任何未售完區域，繼續等待...');
-                state.noHitLogShown = true;
-            }
-            // ✅ 修正四：改用時間判斷（15秒）取代次數判斷
+
             let elapsed = Date.now() - state.startTime;
             if (elapsed > 15000) {
-                extLog(`⛔ [IBON] 已等待 ${Math.round(elapsed / 1000)} 秒未找到目標，觸發重整`);
-                scanner.stop();
+                extLog(`⛔ [IBON] 已等待 ${Math.round(elapsed / 1000)} 秒未找到，觸發重整`);
+                globalIBONScanner.stop();
+                globalIBONScanner = null;
                 await triggerAutoReload(autoReload);
             }
             return;
         }
+
         // ─────────────────────────────────────────────
         // STEP_SELECT_QTY
         // ─────────────────────────────────────────────
         if (step === 'STEP_SELECT_QTY') {
-            if (state.qtyDone || dropdownValue === "none") return;
-            let qtySelects = Array.from(
-                document.querySelectorAll('select:not([disabled])')
-            ).filter(isQuantitySelect);
-            if (qtySelects.length === 0) return;
-            let sel       = qtySelects[0];
-            let target    = dropdownValue.toString();
-            let validOpts = Array.from(sel.options).filter(o => parseInt(o.value) > 0);
-            if (!Array.from(sel.options).some(o => o.value === target) && validOpts.length > 0) {
-                target = validOpts[validOpts.length - 1].value;
+            if (state.qtyDone) {
+                return;
             }
-            if (sel.value !== target) {
-                simulateHumanInput(sel, target);
-                extLog(`✅ [IBON] 已選 ${target} 張！請手動輸入驗證碼！`);
-                state.qtyDone = true;
+
+            extLog(`\n📋 ════════════════════════════════════════`);
+            extLog(`📋 [IBON] 進入數量步驟`);
+            extLog(`📋 [目標數量] ${dropdownValue}`);
+            extLog(`📋 ════════════════════════════════════════\n`);
+
+            // ✅ 優先查找 AMOUNT_DDL（新頁面格式）
+            let dropdown = document.querySelector('select[name*="AMOUNT_DDL"]');
+            
+            // ✅ 備選：查找其他數量選擇器
+            if (!dropdown) {
+                dropdown = document.querySelector('select[name*="Qty"], select[name*="qty"]');
             }
+
+            if (dropdown) {
+                try {
+                    dropdown.value = String(dropdownValue);
+                    dropdown.dispatchEvent(new Event('change', { bubbles: true }));
+                    dropdown.dispatchEvent(new Event('input', { bubbles: true }));
+                    extLog(`✅ [IBON] 已設定購買數量：${dropdownValue}`);
+                    state.qtyDone = true;
+                    await sleep(randInt(300, 800));
+                } catch(e) {
+                    extLog(`⚠️ [IBON] 設定數量失敗：${e.message}`);
+                }
+            } else {
+                extLog(`⚠️ [IBON] 找不到數量選擇器`);
+            }
+
+            extLog(`📋 ════════════════════════════════════════\n`);
             return;
         }
+
         // ─────────────────────────────────────────────
         // STEP_CONFIRM
         // ─────────────────────────────────────────────
         if (step === 'STEP_CONFIRM') {
             extLog('🎉 [IBON] 已到達確認頁，停止掃描');
-            scanner.stop();
+            globalIBONScanner.stop();
+            globalIBONScanner = null;
             return;
         }
+
     }, 250, 100);
 }
+
+
+
+
+
 
 
 // =========================================================================
@@ -871,23 +1499,35 @@ function detectPlatform() {
     return 'UNKNOWN';
 }
 
+// =========================================================================
+// content.js 路由層修正
+// =========================================================================
 function startAutoFill() {
-    // ✅ 修正一：改用 platform 當 key，避免不同平台互相干擾
     let platform = detectPlatform();
     if (platform === 'UNKNOWN') return;
-
     let flagKey = `hasStartedAutoFill_${platform}`;
     if (window[flagKey]) return;
     window[flagKey] = true;
-
+    // ✅ 修正：確保讀取所有設定，包括 autoReload
     chrome.storage.sync.get(
         ['autoCheck', 'autoReload', 'dropdownValue', 'autoClickZone', 'zoneKeywords'],
         function(data) {
-            let settings = data || {};
-
-            // ✅ 修正二：加上 log 確認觸發平台
-            extLog(`🚀 [路由] 偵測到平台：${platform}`);
-
+            let raw = data || {};
+            // ✅ 完整的設定物件
+            let settings = {
+                autoCheck:     raw.autoCheck     === true,
+                autoReload:    raw.autoReload    === true,  // ✅ 確保是 boolean
+                autoClickZone: raw.autoClickZone === true,
+                dropdownValue: raw.dropdownValue || "none",
+                zoneKeywords:  raw.zoneKeywords  || ""
+            };
+            extLog(`🚀 [路由] 平台：${platform}`);
+            extLog(`🚀 [路由] 讀取設定：`);
+            extLog(`  - autoCheck: ${settings.autoCheck}`);
+            extLog(`  - autoReload: ${settings.autoReload}`);  // ✅ 加上 debug log
+            extLog(`  - autoClickZone: ${settings.autoClickZone}`);
+            extLog(`  - dropdownValue: ${settings.dropdownValue}`);
+            extLog(`  - zoneKeywords: ${settings.zoneKeywords}`);
             if      (platform === 'TIXCRAFT') runTixCraft(settings);
             else if (platform === 'KKTIX')    runKKTIX(settings);
             else if (platform === 'IBON')     runIBON(settings);
